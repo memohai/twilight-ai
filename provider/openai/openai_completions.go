@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/memohai/twilight-ai/internal/utils"
-	"github.com/memohai/twilight-ai/types"
+	"github.com/memohai/twilight-ai/sdk"
 )
 
 const defaultBaseURL = "https://api.openai.com/v1"
@@ -54,22 +54,22 @@ func (p *OpenAICompletionsProvider) Name() string {
 	return "openai-completions"
 }
 
-func (p *OpenAICompletionsProvider) GetModels() ([]types.Model, error) {
+func (p *OpenAICompletionsProvider) GetModels() ([]sdk.Model, error) {
 	return nil, nil
 }
 
 // ChatModel creates a Model bound to this provider.
-func (p *OpenAICompletionsProvider) ChatModel(id string) *types.Model {
-	return &types.Model{
+func (p *OpenAICompletionsProvider) ChatModel(id string) *sdk.Model {
+	return &sdk.Model{
 		ID:       id,
 		Provider: p,
-		Type:     types.ModelTypeChat,
+		Type:     sdk.ModelTypeChat,
 	}
 }
 
 // ---------- DoGenerate ----------
 
-func (p *OpenAICompletionsProvider) DoGenerate(ctx context.Context, params types.GenerateParams) (*types.GenerateResult, error) {
+func (p *OpenAICompletionsProvider) DoGenerate(ctx context.Context, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
 	if params.Model == nil {
 		return nil, fmt.Errorf("openai: model is required")
 	}
@@ -92,7 +92,7 @@ func (p *OpenAICompletionsProvider) DoGenerate(ctx context.Context, params types
 
 // ---------- buildRequest ----------
 
-func (p *OpenAICompletionsProvider) buildRequest(params types.GenerateParams) *chatRequest {
+func (p *OpenAICompletionsProvider) buildRequest(params sdk.GenerateParams) *chatRequest {
 	req := &chatRequest{
 		Model:               params.Model.ID,
 		Messages:            convertMessages(params),
@@ -120,7 +120,7 @@ func (p *OpenAICompletionsProvider) buildRequest(params types.GenerateParams) *c
 	return req
 }
 
-func convertTools(tools []types.Tool) []chatTool {
+func convertTools(tools []sdk.Tool) []chatTool {
 	out := make([]chatTool, 0, len(tools))
 	for _, t := range tools {
 		out = append(out, chatTool{
@@ -137,7 +137,7 @@ func convertTools(tools []types.Tool) []chatTool {
 
 // ---------- message conversion ----------
 
-func convertMessages(params types.GenerateParams) []chatMessage {
+func convertMessages(params sdk.GenerateParams) []chatMessage {
 	var out []chatMessage
 
 	if params.System != "" {
@@ -153,11 +153,11 @@ func convertMessages(params types.GenerateParams) []chatMessage {
 	return out
 }
 
-func convertMessage(msg types.Message) []chatMessage {
+func convertMessage(msg sdk.Message) []chatMessage {
 	switch msg.Role {
-	case types.MessageRoleTool:
+	case sdk.MessageRoleTool:
 		return convertToolResultMessages(msg)
-	case types.MessageRoleAssistant:
+	case sdk.MessageRoleAssistant:
 		return []chatMessage{convertAssistantMessage(msg)}
 	default:
 		return []chatMessage{{
@@ -167,15 +167,15 @@ func convertMessage(msg types.Message) []chatMessage {
 	}
 }
 
-func convertAssistantMessage(msg types.Message) chatMessage {
+func convertAssistantMessage(msg sdk.Message) chatMessage {
 	cm := chatMessage{Role: "assistant"}
 
-	var contentParts []types.MessagePart
+	var contentParts []sdk.MessagePart
 	var toolCalls []chatToolCall
 
 	for _, part := range msg.Content {
 		switch p := part.(type) {
-		case types.ToolCallPart:
+		case sdk.ToolCallPart:
 			args, _ := json.Marshal(p.Input)
 			toolCalls = append(toolCalls, chatToolCall{
 				ID:   p.ToolCallID,
@@ -200,10 +200,10 @@ func convertAssistantMessage(msg types.Message) chatMessage {
 	return cm
 }
 
-func convertToolResultMessages(msg types.Message) []chatMessage {
+func convertToolResultMessages(msg sdk.Message) []chatMessage {
 	var out []chatMessage
 	for _, part := range msg.Content {
-		if trp, ok := part.(types.ToolResultPart); ok {
+		if trp, ok := part.(sdk.ToolResultPart); ok {
 			content, _ := json.Marshal(trp.Result)
 			out = append(out, chatMessage{
 				Role:       "tool",
@@ -215,9 +215,9 @@ func convertToolResultMessages(msg types.Message) []chatMessage {
 	return out
 }
 
-func convertContent(parts []types.MessagePart) any {
+func convertContent(parts []sdk.MessagePart) any {
 	if len(parts) == 1 {
-		if tp, ok := parts[0].(types.TextPart); ok {
+		if tp, ok := parts[0].(sdk.TextPart); ok {
 			return tp.Text
 		}
 	}
@@ -225,16 +225,16 @@ func convertContent(parts []types.MessagePart) any {
 	out := make([]any, 0, len(parts))
 	for _, part := range parts {
 		switch p := part.(type) {
-		case types.TextPart:
+		case sdk.TextPart:
 			out = append(out, chatContentPartText{Type: "text", Text: p.Text})
-		case types.ReasoningPart:
+		case sdk.ReasoningPart:
 			out = append(out, chatContentPartText{Type: "text", Text: p.Text})
-		case types.ImagePart:
+		case sdk.ImagePart:
 			out = append(out, chatContentPartImage{
 				Type:     "image_url",
 				ImageURL: chatImageURL{URL: p.Image},
 			})
-		case types.FilePart:
+		case sdk.FilePart:
 			out = append(out, chatContentPartText{Type: "text", Text: p.Data})
 		}
 	}
@@ -243,10 +243,10 @@ func convertContent(parts []types.MessagePart) any {
 
 // ---------- parseResponse ----------
 
-func (p *OpenAICompletionsProvider) parseResponse(resp *chatResponse) *types.GenerateResult {
-	result := &types.GenerateResult{
+func (p *OpenAICompletionsProvider) parseResponse(resp *chatResponse) *sdk.GenerateResult {
+	result := &sdk.GenerateResult{
 		Usage: convertUsage(&resp.Usage),
-		Response: types.ResponseMetadata{
+		Response: sdk.ResponseMetadata{
 			ID:        resp.ID,
 			ModelID:   resp.Model,
 			Timestamp: time.Unix(resp.Created, 0),
@@ -263,7 +263,7 @@ func (p *OpenAICompletionsProvider) parseResponse(resp *chatResponse) *types.Gen
 		for _, tc := range choice.Message.ToolCalls {
 			var input any
 			json.Unmarshal([]byte(tc.Function.Arguments), &input)
-			result.ToolCalls = append(result.ToolCalls, types.ToolCall{
+			result.ToolCalls = append(result.ToolCalls, sdk.ToolCall{
 				ToolCallID: tc.ID,
 				ToolName:   tc.Function.Name,
 				Input:      input,
@@ -276,7 +276,7 @@ func (p *OpenAICompletionsProvider) parseResponse(resp *chatResponse) *types.Gen
 
 // ---------- DoStream ----------
 
-func (p *OpenAICompletionsProvider) DoStream(ctx context.Context, params types.GenerateParams) (*types.StreamResult, error) {
+func (p *OpenAICompletionsProvider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sdk.StreamResult, error) {
 	if params.Model == nil {
 		return nil, fmt.Errorf("openai: model is required")
 	}
@@ -285,7 +285,7 @@ func (p *OpenAICompletionsProvider) DoStream(ctx context.Context, params types.G
 	req.Stream = true
 	req.StreamOptions = &chatStreamOptions{IncludeUsage: true}
 
-	ch := make(chan types.StreamPart, 64)
+	ch := make(chan sdk.StreamPart, 64)
 
 	go func() {
 		defer close(ch)
@@ -294,15 +294,15 @@ func (p *OpenAICompletionsProvider) DoStream(ctx context.Context, params types.G
 			textStartSent      bool
 			reasoningStartSent bool
 			rawFinishReason    string
-			finishReason       types.FinishReason
-			usage              types.Usage
+			finishReason       sdk.FinishReason
+			usage              sdk.Usage
 			chunkID            string
 			chunkModel         string
 			chunkCreated       int64
 			pendingToolCalls   = map[int]*streamingToolCall{}
 		)
 
-		send := func(part types.StreamPart) bool {
+		send := func(part sdk.StreamPart) bool {
 			select {
 			case ch <- part:
 				return true
@@ -311,10 +311,10 @@ func (p *OpenAICompletionsProvider) DoStream(ctx context.Context, params types.G
 			}
 		}
 
-		if !send(&types.StartPart{}) {
+		if !send(&sdk.StartPart{}) {
 			return
 		}
-		if !send(&types.StartStepPart{}) {
+		if !send(&sdk.StartStepPart{}) {
 			return
 		}
 
@@ -331,7 +331,7 @@ func (p *OpenAICompletionsProvider) DoStream(ctx context.Context, params types.G
 
 			var chunk chatChunkResponse
 			if err := json.Unmarshal([]byte(ev.Data), &chunk); err != nil {
-				send(&types.ErrorPart{Error: fmt.Errorf("openai: unmarshal chunk: %w", err)})
+				send(&sdk.ErrorPart{Error: fmt.Errorf("openai: unmarshal chunk: %w", err)})
 				return err
 			}
 
@@ -353,23 +353,23 @@ func (p *OpenAICompletionsProvider) DoStream(ctx context.Context, params types.G
 			// reasoning content (e.g. DeepSeek, o1-compatible providers)
 			if choice.Delta.ReasoningContent != "" {
 				if !reasoningStartSent {
-					send(&types.ReasoningStartPart{ID: chunk.ID})
+					send(&sdk.ReasoningStartPart{ID: chunk.ID})
 					reasoningStartSent = true
 				}
-				send(&types.ReasoningDeltaPart{ID: chunk.ID, Text: choice.Delta.ReasoningContent})
+				send(&sdk.ReasoningDeltaPart{ID: chunk.ID, Text: choice.Delta.ReasoningContent})
 			}
 
 			// text content
 			if choice.Delta.Content != "" {
 				if reasoningStartSent {
-					send(&types.ReasoningEndPart{ID: chunk.ID})
+					send(&sdk.ReasoningEndPart{ID: chunk.ID})
 					reasoningStartSent = false
 				}
 				if !textStartSent {
-					send(&types.TextStartPart{ID: chunk.ID})
+					send(&sdk.TextStartPart{ID: chunk.ID})
 					textStartSent = true
 				}
-				send(&types.TextDeltaPart{ID: chunk.ID, Text: choice.Delta.Content})
+				send(&sdk.TextDeltaPart{ID: chunk.ID, Text: choice.Delta.Content})
 			}
 
 			// tool call deltas
@@ -380,14 +380,14 @@ func (p *OpenAICompletionsProvider) DoStream(ctx context.Context, params types.G
 					pendingToolCalls[tc.Index] = stc
 					stc.id = tc.ID
 					stc.name = tc.Function.Name
-					send(&types.ToolInputStartPart{
+					send(&sdk.ToolInputStartPart{
 						ID:       tc.ID,
 						ToolName: tc.Function.Name,
 					})
 				}
 				if tc.Function.Arguments != "" {
 					stc.args += tc.Function.Arguments
-					send(&types.ToolInputDeltaPart{
+					send(&sdk.ToolInputDeltaPart{
 						ID:    stc.id,
 						Delta: tc.Function.Arguments,
 					})
@@ -400,28 +400,28 @@ func (p *OpenAICompletionsProvider) DoStream(ctx context.Context, params types.G
 				finishReason = mapFinishReason(rawFinishReason)
 
 				if reasoningStartSent {
-					send(&types.ReasoningEndPart{ID: chunk.ID})
+					send(&sdk.ReasoningEndPart{ID: chunk.ID})
 				}
 				if textStartSent {
-					send(&types.TextEndPart{ID: chunk.ID})
+					send(&sdk.TextEndPart{ID: chunk.ID})
 				}
 
 				for _, stc := range pendingToolCalls {
-					send(&types.ToolInputEndPart{ID: stc.id})
+					send(&sdk.ToolInputEndPart{ID: stc.id})
 					var input any
 					json.Unmarshal([]byte(stc.args), &input)
-					send(&types.StreamToolCallPart{
+					send(&sdk.StreamToolCallPart{
 						ToolCallID: stc.id,
 						ToolName:   stc.name,
 						Input:      input,
 					})
 				}
 
-				send(&types.FinishStepPart{
+				send(&sdk.FinishStepPart{
 					FinishReason:    finishReason,
 					RawFinishReason: rawFinishReason,
 					Usage:           usage,
-					Response: types.ResponseMetadata{
+					Response: sdk.ResponseMetadata{
 						ID:        chunkID,
 						ModelID:   chunkModel,
 						Timestamp: time.Unix(chunkCreated, 0),
@@ -433,17 +433,17 @@ func (p *OpenAICompletionsProvider) DoStream(ctx context.Context, params types.G
 		})
 
 		if err != nil {
-			send(&types.ErrorPart{Error: fmt.Errorf("openai: stream failed: %w", err)})
+			send(&sdk.ErrorPart{Error: fmt.Errorf("openai: stream failed: %w", err)})
 		}
 
-		send(&types.FinishPart{
+		send(&sdk.FinishPart{
 			FinishReason:    finishReason,
 			RawFinishReason: rawFinishReason,
 			TotalUsage:      usage,
 		})
 	}()
 
-	return &types.StreamResult{Stream: ch}, nil
+	return &sdk.StreamResult{Stream: ch}, nil
 }
 
 type streamingToolCall struct {
@@ -454,8 +454,8 @@ type streamingToolCall struct {
 
 // ---------- helpers ----------
 
-func convertUsage(u *chatUsage) types.Usage {
-	usage := types.Usage{
+func convertUsage(u *chatUsage) sdk.Usage {
+	usage := sdk.Usage{
 		InputTokens:  u.PromptTokens,
 		OutputTokens: u.CompletionTokens,
 		TotalTokens:  u.TotalTokens,
@@ -472,17 +472,17 @@ func convertUsage(u *chatUsage) types.Usage {
 	return usage
 }
 
-func mapFinishReason(reason string) types.FinishReason {
+func mapFinishReason(reason string) sdk.FinishReason {
 	switch reason {
 	case "stop":
-		return types.FinishReasonStop
+		return sdk.FinishReasonStop
 	case "length":
-		return types.FinishReasonLength
+		return sdk.FinishReasonLength
 	case "content_filter":
-		return types.FinishReasonContentFilter
+		return sdk.FinishReasonContentFilter
 	case "tool_calls":
-		return types.FinishReasonToolCalls
+		return sdk.FinishReasonToolCalls
 	default:
-		return types.FinishReasonUnknown
+		return sdk.FinishReasonUnknown
 	}
 }

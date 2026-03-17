@@ -1,4 +1,4 @@
-package types
+package sdk
 
 type ToolCall struct {
 	ToolCallID string `json:"toolCallId"`

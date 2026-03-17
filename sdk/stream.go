@@ -1,4 +1,4 @@
-package types
+package sdk
 
 type StreamPartType string
 
@@ -17,6 +17,7 @@ const (
 	StreamPartTypeToolError           StreamPartType = "tool-error"
 	StreamPartTypeToolOutputDenied    StreamPartType = "tool-output-denied"
 	StreamPartTypeToolApprovalRequest StreamPartType = "tool-approval-request"
+	StreamPartTypeToolProgress        StreamPartType = "tool-progress"
 	StreamPartTypeSource              StreamPartType = "source"
 	StreamPartTypeFile                StreamPartType = "file"
 	StreamPartTypeStart               StreamPartType = "start"
@@ -150,6 +151,16 @@ type ToolApprovalRequestPart struct {
 
 func (p *ToolApprovalRequestPart) Type() StreamPartType { return StreamPartTypeToolApprovalRequest }
 
+// --- Tool Progress (UX streaming during execution) ---
+
+type ToolProgressPart struct {
+	ToolCallID string
+	ToolName   string
+	Content    any
+}
+
+func (p *ToolProgressPart) Type() StreamPartType { return StreamPartTypeToolProgress }
+
 // --- Source & File ---
 
 type StreamSourcePart struct {
@@ -212,8 +223,16 @@ func (p *RawPart) Type() StreamPartType { return StreamPartTypeRaw }
 
 // StreamResult holds a channel that yields StreamPart chunks.
 // The channel is closed when the stream ends.
+//
+// Steps and Messages are populated during stream consumption and are safe to
+// read after Stream is fully consumed (i.e., after a for-range loop exits).
 type StreamResult struct {
 	Stream <-chan StreamPart
+	// Steps holds the result of each step. Populated as the stream is consumed.
+	Steps []StepResult
+	// Messages holds all output messages across all steps (assistant + tool),
+	// excluding the original input messages. Populated as the stream is consumed.
+	Messages []Message
 }
 
 // Text consumes the entire stream and returns the concatenated text content.

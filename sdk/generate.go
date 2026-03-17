@@ -1,4 +1,4 @@
-package types
+package sdk
 
 type FinishReason string
 
@@ -45,6 +45,21 @@ type GenerateParams struct {
 	ReasoningEffort  *string  `json:"reasoningEffort,omitempty"`
 }
 
+// StepResult represents the outcome of a single step (one LLM call + tool execution round).
+type StepResult struct {
+	Text            string           `json:"text"`
+	Reasoning       string           `json:"reasoning,omitempty"`
+	FinishReason    FinishReason     `json:"finishReason"`
+	RawFinishReason string           `json:"rawFinishReason,omitempty"`
+	Usage           Usage            `json:"usage"`
+	ToolCalls       []ToolCall       `json:"toolCalls,omitempty"`
+	ToolResults     []ToolResult     `json:"toolResults,omitempty"`
+	Response        ResponseMetadata `json:"response,omitempty"`
+	// Messages holds the messages produced by this step (assistant + tool),
+	// excluding any prior context from earlier steps.
+	Messages []Message `json:"messages,omitempty"`
+}
+
 type GenerateResult struct {
 	Text            string           `json:"text"`
 	Reasoning       string           `json:"reasoning,omitempty"`
@@ -56,4 +71,9 @@ type GenerateResult struct {
 	ToolCalls       []ToolCall       `json:"toolCalls,omitempty"`
 	ToolResults     []ToolResult     `json:"toolResults,omitempty"`
 	Response        ResponseMetadata `json:"response,omitempty"`
+	// Steps holds the result of each step in a multi-step execution.
+	Steps []StepResult `json:"steps,omitempty"`
+	// Messages holds all output messages across all steps (assistant + tool),
+	// excluding the original input messages.
+	Messages []Message `json:"messages,omitempty"`
 }

@@ -11,7 +11,7 @@ import (
 
 	"github.com/memohai/twilight-ai/internal/testutil"
 	"github.com/memohai/twilight-ai/provider/openai"
-	"github.com/memohai/twilight-ai/types"
+	"github.com/memohai/twilight-ai/sdk"
 )
 
 // ---------- unit tests (mock server) ----------
@@ -56,12 +56,12 @@ func TestDoGenerate(t *testing.T) {
 		openai.WithBaseURL(srv.URL),
 	)
 
-	model := &types.Model{ID: "gpt-4o-mini"}
-	result, err := p.DoGenerate(context.Background(), types.GenerateParams{
+	model := &sdk.Model{ID: "gpt-4o-mini"}
+	result, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
 		Model: model,
-		Messages: []types.Message{{
-			Role:  types.MessageRoleUser,
-			Content: []types.MessagePart{types.TextPart{Text: "Hi"}},
+		Messages: []sdk.Message{{
+			Role:  sdk.MessageRoleUser,
+			Content: []sdk.MessagePart{sdk.TextPart{Text: "Hi"}},
 		}},
 	})
 	if err != nil {
@@ -71,7 +71,7 @@ func TestDoGenerate(t *testing.T) {
 	if result.Text != "Hello!" {
 		t.Errorf("expected 'Hello!', got %q", result.Text)
 	}
-	if result.FinishReason != types.FinishReasonStop {
+	if result.FinishReason != sdk.FinishReasonStop {
 		t.Errorf("expected finish reason 'stop', got %q", result.FinishReason)
 	}
 	if result.Usage.InputTokens != 5 {
@@ -110,12 +110,12 @@ func TestDoStream(t *testing.T) {
 		openai.WithBaseURL(srv.URL),
 	)
 
-	model := &types.Model{ID: "gpt-4o-mini"}
-	sr, err := p.DoStream(context.Background(), types.GenerateParams{
+	model := &sdk.Model{ID: "gpt-4o-mini"}
+	sr, err := p.DoStream(context.Background(), sdk.GenerateParams{
 		Model: model,
-		Messages: []types.Message{{
-			Role:  types.MessageRoleUser,
-			Content: []types.MessagePart{types.TextPart{Text: "Hi"}},
+		Messages: []sdk.Message{{
+			Role:  sdk.MessageRoleUser,
+			Content: []sdk.MessagePart{sdk.TextPart{Text: "Hi"}},
 		}},
 	})
 	if err != nil {
@@ -126,13 +126,13 @@ func TestDoStream(t *testing.T) {
 	var gotStart, gotFinish bool
 	for part := range sr.Stream {
 		switch p := part.(type) {
-		case *types.StartPart:
+		case *sdk.StartPart:
 			gotStart = true
-		case *types.TextDeltaPart:
+		case *sdk.TextDeltaPart:
 			collected += p.Text
-		case *types.FinishPart:
+		case *sdk.FinishPart:
 			gotFinish = true
-			if p.FinishReason != types.FinishReasonStop {
+			if p.FinishReason != sdk.FinishReasonStop {
 				t.Errorf("expected stop, got %q", p.FinishReason)
 			}
 		}
@@ -210,13 +210,13 @@ func TestDoGenerate_WithImage(t *testing.T) {
 		openai.WithBaseURL(srv.URL),
 	)
 
-	result, err := p.DoGenerate(context.Background(), types.GenerateParams{
-		Model: &types.Model{ID: "gpt-4o-mini"},
-		Messages: []types.Message{{
-			Role: types.MessageRoleUser,
-			Content: []types.MessagePart{
-				types.TextPart{Text: "What is in this image?"},
-				types.ImagePart{Image: "https://example.com/cat.png", MediaType: "image/png"},
+	result, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model: &sdk.Model{ID: "gpt-4o-mini"},
+		Messages: []sdk.Message{{
+			Role: sdk.MessageRoleUser,
+			Content: []sdk.MessagePart{
+				sdk.TextPart{Text: "What is in this image?"},
+				sdk.ImagePart{Image: "https://example.com/cat.png", MediaType: "image/png"},
 			},
 		}},
 	})
@@ -283,13 +283,13 @@ func TestDoGenerate_ToolCall(t *testing.T) {
 
 	p := openai.NewCompletions(openai.WithAPIKey("test-key"), openai.WithBaseURL(srv.URL))
 
-	result, err := p.DoGenerate(context.Background(), types.GenerateParams{
-		Model: &types.Model{ID: "gpt-4o-mini"},
-		Messages: []types.Message{{
-			Role:    types.MessageRoleUser,
-			Content: []types.MessagePart{types.TextPart{Text: "What's the weather in Beijing?"}},
+	result, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model: &sdk.Model{ID: "gpt-4o-mini"},
+		Messages: []sdk.Message{{
+			Role:    sdk.MessageRoleUser,
+			Content: []sdk.MessagePart{sdk.TextPart{Text: "What's the weather in Beijing?"}},
 		}},
-		Tools: []types.Tool{{
+		Tools: []sdk.Tool{{
 			Name:        "get_weather",
 			Description: "Get the weather for a location",
 			Parameters: map[string]any{
@@ -306,8 +306,8 @@ func TestDoGenerate_ToolCall(t *testing.T) {
 		t.Fatalf("DoGenerate: %v", err)
 	}
 
-	if result.FinishReason != types.FinishReasonToolCalls {
-		t.Errorf("finish: got %q, want %q", result.FinishReason, types.FinishReasonToolCalls)
+	if result.FinishReason != sdk.FinishReasonToolCalls {
+		t.Errorf("finish: got %q, want %q", result.FinishReason, sdk.FinishReasonToolCalls)
 	}
 	if len(result.ToolCalls) != 1 {
 		t.Fatalf("tool calls: got %d, want 1", len(result.ToolCalls))
@@ -386,24 +386,24 @@ func TestDoGenerate_ToolCallMultiTurn(t *testing.T) {
 
 	p := openai.NewCompletions(openai.WithAPIKey("test-key"), openai.WithBaseURL(srv.URL))
 
-	result, err := p.DoGenerate(context.Background(), types.GenerateParams{
-		Model: &types.Model{ID: "gpt-4o-mini"},
-		Messages: []types.Message{
+	result, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model: &sdk.Model{ID: "gpt-4o-mini"},
+		Messages: []sdk.Message{
 			{
-				Role:    types.MessageRoleUser,
-				Content: []types.MessagePart{types.TextPart{Text: "Weather?"}},
+				Role:    sdk.MessageRoleUser,
+				Content: []sdk.MessagePart{sdk.TextPart{Text: "Weather?"}},
 			},
 			{
-				Role: types.MessageRoleAssistant,
-				Content: []types.MessagePart{types.ToolCallPart{
+				Role: sdk.MessageRoleAssistant,
+				Content: []sdk.MessagePart{sdk.ToolCallPart{
 					ToolCallID: "call_abc",
 					ToolName:   "get_weather",
 					Input:      map[string]any{"location": "Beijing"},
 				}},
 			},
 			{
-				Role: types.MessageRoleTool,
-				Content: []types.MessagePart{types.ToolResultPart{
+				Role: sdk.MessageRoleTool,
+				Content: []sdk.MessagePart{sdk.ToolResultPart{
 					ToolCallID: "call_abc",
 					ToolName:   "get_weather",
 					Result:     map[string]any{"temp": 25, "condition": "sunny"},
@@ -446,13 +446,13 @@ func TestDoStream_ToolCall(t *testing.T) {
 
 	p := openai.NewCompletions(openai.WithAPIKey("test-key"), openai.WithBaseURL(srv.URL))
 
-	sr, err := p.DoStream(context.Background(), types.GenerateParams{
-		Model: &types.Model{ID: "gpt-4o-mini"},
-		Messages: []types.Message{{
-			Role:    types.MessageRoleUser,
-			Content: []types.MessagePart{types.TextPart{Text: "Weather in Tokyo?"}},
+	sr, err := p.DoStream(context.Background(), sdk.GenerateParams{
+		Model: &sdk.Model{ID: "gpt-4o-mini"},
+		Messages: []sdk.Message{{
+			Role:    sdk.MessageRoleUser,
+			Content: []sdk.MessagePart{sdk.TextPart{Text: "Weather in Tokyo?"}},
 		}},
-		Tools: []types.Tool{{Name: "get_weather", Parameters: map[string]any{"type": "object"}}},
+		Tools: []sdk.Tool{{Name: "get_weather", Parameters: map[string]any{"type": "object"}}},
 	})
 	if err != nil {
 		t.Fatalf("DoStream: %v", err)
@@ -462,32 +462,32 @@ func TestDoStream_ToolCall(t *testing.T) {
 		gotInputStart  bool
 		gotInputEnd    bool
 		argsDelta      string
-		gotToolCall    *types.StreamToolCallPart
+		gotToolCall    *sdk.StreamToolCallPart
 		gotFinishStep  bool
 		gotFinish      bool
 	)
 
 	for part := range sr.Stream {
 		switch p := part.(type) {
-		case *types.ToolInputStartPart:
+		case *sdk.ToolInputStartPart:
 			gotInputStart = true
 			if p.ToolName != "get_weather" {
 				t.Errorf("input start tool name: got %q", p.ToolName)
 			}
-		case *types.ToolInputDeltaPart:
+		case *sdk.ToolInputDeltaPart:
 			argsDelta += p.Delta
-		case *types.ToolInputEndPart:
+		case *sdk.ToolInputEndPart:
 			gotInputEnd = true
-		case *types.StreamToolCallPart:
+		case *sdk.StreamToolCallPart:
 			gotToolCall = p
-		case *types.FinishStepPart:
+		case *sdk.FinishStepPart:
 			gotFinishStep = true
-			if p.FinishReason != types.FinishReasonToolCalls {
+			if p.FinishReason != sdk.FinishReasonToolCalls {
 				t.Errorf("finish step reason: got %q", p.FinishReason)
 			}
-		case *types.FinishPart:
+		case *sdk.FinishPart:
 			gotFinish = true
-		case *types.ErrorPart:
+		case *sdk.ErrorPart:
 			t.Fatalf("error: %v", p.Error)
 		}
 	}
@@ -521,7 +521,7 @@ func TestDoStream_ToolCall(t *testing.T) {
 
 func TestDoGenerate_NoModel(t *testing.T) {
 	p := openai.NewCompletions(openai.WithAPIKey("k"))
-	_, err := p.DoGenerate(context.Background(), types.GenerateParams{})
+	_, err := p.DoGenerate(context.Background(), sdk.GenerateParams{})
 	if err == nil {
 		t.Fatal("expected error for nil model")
 	}
@@ -529,7 +529,7 @@ func TestDoGenerate_NoModel(t *testing.T) {
 
 func TestDoStream_NoModel(t *testing.T) {
 	p := openai.NewCompletions(openai.WithAPIKey("k"))
-	_, err := p.DoStream(context.Background(), types.GenerateParams{})
+	_, err := p.DoStream(context.Background(), sdk.GenerateParams{})
 	if err == nil {
 		t.Fatal("expected error for nil model")
 	}
@@ -556,22 +556,22 @@ func newIntegrationProvider(t *testing.T) *openai.OpenAICompletionsProvider {
 	return openai.NewCompletions(opts...)
 }
 
-func integrationModel(t *testing.T) *types.Model {
+func integrationModel(t *testing.T) *sdk.Model {
 	t.Helper()
 	m := os.Getenv("OPENAI_MODEL")
 	if m == "" {
 		m = "gpt-4o-mini"
 	}
-	return &types.Model{ID: m}
+	return &sdk.Model{ID: m}
 }
 
 func TestIntegration_DoGenerate(t *testing.T) {
 	p := newIntegrationProvider(t)
-	result, err := p.DoGenerate(context.Background(), types.GenerateParams{
+	result, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
 		Model: integrationModel(t),
-		Messages: []types.Message{{
-			Role:  types.MessageRoleUser,
-			Content: []types.MessagePart{types.TextPart{Text: "Say hello in one word."}},
+		Messages: []sdk.Message{{
+			Role:  sdk.MessageRoleUser,
+			Content: []sdk.MessagePart{sdk.TextPart{Text: "Say hello in one word."}},
 		}},
 	})
 	if err != nil {
@@ -587,11 +587,11 @@ func TestIntegration_DoGenerate(t *testing.T) {
 
 func TestIntegration_DoStream(t *testing.T) {
 	p := newIntegrationProvider(t)
-	sr, err := p.DoStream(context.Background(), types.GenerateParams{
+	sr, err := p.DoStream(context.Background(), sdk.GenerateParams{
 		Model: integrationModel(t),
-		Messages: []types.Message{{
-			Role:  types.MessageRoleUser,
-			Content: []types.MessagePart{types.TextPart{Text: "Count from 1 to 5."}},
+		Messages: []sdk.Message{{
+			Role:  sdk.MessageRoleUser,
+			Content: []sdk.MessagePart{sdk.TextPart{Text: "Count from 1 to 5."}},
 		}},
 	})
 	if err != nil {
@@ -601,12 +601,12 @@ func TestIntegration_DoStream(t *testing.T) {
 	var text string
 	for part := range sr.Stream {
 		switch p := part.(type) {
-		case *types.TextDeltaPart:
+		case *sdk.TextDeltaPart:
 			text += p.Text
 			t.Logf("text delta: %q", p.Text)
-		case *types.ErrorPart:
+		case *sdk.ErrorPart:
 			t.Fatalf("stream error: %v", p.Error)
-		case *types.FinishPart:
+		case *sdk.FinishPart:
 			t.Logf("finish=%s", p.FinishReason)
 		}
 	}

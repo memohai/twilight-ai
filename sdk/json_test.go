@@ -1,16 +1,16 @@
-package types_test
+package sdk_test
 
 import (
 	"encoding/json"
 	"testing"
 
-	"github.com/memohai/twilight-ai/types"
+	"github.com/memohai/twilight-ai/sdk"
 )
 
 func TestMessage_JSON_TextOnly(t *testing.T) {
-	msg := types.Message{
-		Role:    types.MessageRoleUser,
-		Content: []types.MessagePart{types.TextPart{Text: "Hello"}},
+	msg := sdk.Message{
+		Role:    sdk.MessageRoleUser,
+		Content: []sdk.MessagePart{sdk.TextPart{Text: "Hello"}},
 	}
 
 	data, err := json.Marshal(msg)
@@ -19,18 +19,18 @@ func TestMessage_JSON_TextOnly(t *testing.T) {
 	}
 	t.Logf("json: %s", data)
 
-	var got types.Message
+	var got sdk.Message
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
 
-	if got.Role != types.MessageRoleUser {
-		t.Errorf("role: got %q, want %q", got.Role, types.MessageRoleUser)
+	if got.Role != sdk.MessageRoleUser {
+		t.Errorf("role: got %q, want %q", got.Role, sdk.MessageRoleUser)
 	}
 	if len(got.Content) != 1 {
 		t.Fatalf("parts: got %d, want 1", len(got.Content))
 	}
-	tp, ok := got.Content[0].(types.TextPart)
+	tp, ok := got.Content[0].(sdk.TextPart)
 	if !ok {
 		t.Fatalf("part type: got %T, want TextPart", got.Content[0])
 	}
@@ -40,11 +40,11 @@ func TestMessage_JSON_TextOnly(t *testing.T) {
 }
 
 func TestMessage_JSON_MultiPart(t *testing.T) {
-	msg := types.Message{
-		Role: types.MessageRoleUser,
-		Content: []types.MessagePart{
-			types.TextPart{Text: "Describe this image"},
-			types.ImagePart{Image: "https://example.com/cat.png", MediaType: "image/png"},
+	msg := sdk.Message{
+		Role: sdk.MessageRoleUser,
+		Content: []sdk.MessagePart{
+			sdk.TextPart{Text: "Describe this image"},
+			sdk.ImagePart{Image: "https://example.com/cat.png", MediaType: "image/png"},
 		},
 	}
 
@@ -54,7 +54,7 @@ func TestMessage_JSON_MultiPart(t *testing.T) {
 	}
 	t.Logf("json: %s", data)
 
-	var got types.Message
+	var got sdk.Message
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -62,24 +62,24 @@ func TestMessage_JSON_MultiPart(t *testing.T) {
 	if len(got.Content) != 2 {
 		t.Fatalf("parts: got %d, want 2", len(got.Content))
 	}
-	if tp, ok := got.Content[0].(types.TextPart); !ok || tp.Text != "Describe this image" {
+	if tp, ok := got.Content[0].(sdk.TextPart); !ok || tp.Text != "Describe this image" {
 		t.Errorf("part[0]: got %+v", got.Content[0])
 	}
-	if ip, ok := got.Content[1].(types.ImagePart); !ok || ip.Image != "https://example.com/cat.png" || ip.MediaType != "image/png" {
+	if ip, ok := got.Content[1].(sdk.ImagePart); !ok || ip.Image != "https://example.com/cat.png" || ip.MediaType != "image/png" {
 		t.Errorf("part[1]: got %+v", got.Content[1])
 	}
 }
 
 func TestMessage_JSON_AllPartTypes(t *testing.T) {
-	msg := types.Message{
-		Role: types.MessageRoleAssistant,
-		Content: []types.MessagePart{
-			types.TextPart{Text: "answer"},
-			types.ReasoningPart{Text: "thinking", Signature: "sig123"},
-			types.ImagePart{Image: "data:image/png;base64,abc", MediaType: "image/png"},
-			types.FilePart{Data: "base64data", MediaType: "application/pdf", Filename: "doc.pdf"},
-			types.ToolCallPart{ToolCallID: "tc1", ToolName: "search", Input: map[string]any{"q": "go"}},
-			types.ToolResultPart{ToolCallID: "tc1", ToolName: "search", Result: "found", IsError: false},
+	msg := sdk.Message{
+		Role: sdk.MessageRoleAssistant,
+		Content: []sdk.MessagePart{
+			sdk.TextPart{Text: "answer"},
+			sdk.ReasoningPart{Text: "thinking", Signature: "sig123"},
+			sdk.ImagePart{Image: "data:image/png;base64,abc", MediaType: "image/png"},
+			sdk.FilePart{Data: "base64data", MediaType: "application/pdf", Filename: "doc.pdf"},
+			sdk.ToolCallPart{ToolCallID: "tc1", ToolName: "search", Input: map[string]any{"q": "go"}},
+			sdk.ToolResultPart{ToolCallID: "tc1", ToolName: "search", Result: "found", IsError: false},
 		},
 	}
 
@@ -89,7 +89,7 @@ func TestMessage_JSON_AllPartTypes(t *testing.T) {
 	}
 	t.Logf("json: %s", data)
 
-	var got types.Message
+	var got sdk.Message
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -98,13 +98,13 @@ func TestMessage_JSON_AllPartTypes(t *testing.T) {
 		t.Fatalf("parts: got %d, want 6", len(got.Content))
 	}
 
-	expectTypes := []types.MessagePartType{
-		types.MessagePartTypeText,
-		types.MessagePartTypeReasoning,
-		types.MessagePartTypeImage,
-		types.MessagePartTypeFile,
-		types.MessagePartTypeToolCall,
-		types.MessagePartTypeToolResult,
+	expectTypes := []sdk.MessagePartType{
+		sdk.MessagePartTypeText,
+		sdk.MessagePartTypeReasoning,
+		sdk.MessagePartTypeImage,
+		sdk.MessagePartTypeFile,
+		sdk.MessagePartTypeToolCall,
+		sdk.MessagePartTypeToolResult,
 	}
 	for i, want := range expectTypes {
 		if got.Content[i].PartType() != want {
@@ -112,22 +112,22 @@ func TestMessage_JSON_AllPartTypes(t *testing.T) {
 		}
 	}
 
-	rp := got.Content[1].(types.ReasoningPart)
+	rp := got.Content[1].(sdk.ReasoningPart)
 	if rp.Text != "thinking" || rp.Signature != "sig123" {
 		t.Errorf("reasoning: got %+v", rp)
 	}
 
-	fp := got.Content[3].(types.FilePart)
+	fp := got.Content[3].(sdk.FilePart)
 	if fp.Data != "base64data" || fp.Filename != "doc.pdf" {
 		t.Errorf("file: got %+v", fp)
 	}
 
-	tcp := got.Content[4].(types.ToolCallPart)
+	tcp := got.Content[4].(sdk.ToolCallPart)
 	if tcp.ToolCallID != "tc1" || tcp.ToolName != "search" {
 		t.Errorf("tool call: got %+v", tcp)
 	}
 
-	trp := got.Content[5].(types.ToolResultPart)
+	trp := got.Content[5].(sdk.ToolResultPart)
 	if trp.ToolCallID != "tc1" || trp.Result != "found" {
 		t.Errorf("tool result: got %+v", trp)
 	}
@@ -142,34 +142,34 @@ func TestMessage_JSON_FromRawJSON(t *testing.T) {
 		]
 	}`
 
-	var msg types.Message
+	var msg sdk.Message
 	if err := json.Unmarshal([]byte(raw), &msg); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
 
-	if msg.Role != types.MessageRoleUser {
+	if msg.Role != sdk.MessageRoleUser {
 		t.Errorf("role: got %q", msg.Role)
 	}
 	if len(msg.Content) != 2 {
 		t.Fatalf("parts: got %d", len(msg.Content))
 	}
-	if tp, ok := msg.Content[0].(types.TextPart); !ok || tp.Text != "What is this?" {
+	if tp, ok := msg.Content[0].(sdk.TextPart); !ok || tp.Text != "What is this?" {
 		t.Errorf("part[0]: %+v", msg.Content[0])
 	}
-	if ip, ok := msg.Content[1].(types.ImagePart); !ok || ip.Image != "https://example.com/photo.jpg" {
+	if ip, ok := msg.Content[1].(sdk.ImagePart); !ok || ip.Image != "https://example.com/photo.jpg" {
 		t.Errorf("part[1]: %+v", msg.Content[1])
 	}
 }
 
 func TestUsage_JSON(t *testing.T) {
-	u := types.Usage{
+	u := sdk.Usage{
 		InputTokens:  10,
 		OutputTokens: 20,
 		TotalTokens:  30,
-		InputTokenDetails: types.InputTokenDetail{
+		InputTokenDetails: sdk.InputTokenDetail{
 			CacheReadTokens: 5,
 		},
-		OutputTokenDetails: types.OutputTokenDetail{
+		OutputTokenDetails: sdk.OutputTokenDetail{
 			ReasoningTokens: 8,
 			TextTokens:      12,
 		},
@@ -181,7 +181,7 @@ func TestUsage_JSON(t *testing.T) {
 	}
 	t.Logf("json: %s", data)
 
-	var got types.Usage
+	var got sdk.Usage
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -198,15 +198,15 @@ func TestUsage_JSON(t *testing.T) {
 }
 
 func TestGenerateResult_JSON(t *testing.T) {
-	r := types.GenerateResult{
+	r := sdk.GenerateResult{
 		Text:         "Hello world",
-		FinishReason: types.FinishReasonStop,
-		Usage: types.Usage{
+		FinishReason: sdk.FinishReasonStop,
+		Usage: sdk.Usage{
 			InputTokens:  5,
 			OutputTokens: 2,
 			TotalTokens:  7,
 		},
-		ToolCalls: []types.ToolCall{{
+		ToolCalls: []sdk.ToolCall{{
 			ToolCallID: "tc1",
 			ToolName:   "search",
 			Input:      map[string]any{"query": "go"},
@@ -219,7 +219,7 @@ func TestGenerateResult_JSON(t *testing.T) {
 	}
 	t.Logf("json: %s", data)
 
-	var got types.GenerateResult
+	var got sdk.GenerateResult
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestGenerateResult_JSON(t *testing.T) {
 	if got.Text != "Hello world" {
 		t.Errorf("text: got %q", got.Text)
 	}
-	if got.FinishReason != types.FinishReasonStop {
+	if got.FinishReason != sdk.FinishReasonStop {
 		t.Errorf("finish: got %q", got.FinishReason)
 	}
 	if len(got.ToolCalls) != 1 || got.ToolCalls[0].ToolName != "search" {

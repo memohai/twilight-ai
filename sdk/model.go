@@ -1,4 +1,4 @@
-package types
+package sdk
 
 type ModelType string
 
