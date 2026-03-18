@@ -134,6 +134,10 @@ func (p *Provider) DoGenerate(ctx context.Context, params sdk.GenerateParams) (*
 		Body:    req,
 	})
 	if err != nil {
+		var apiErr *utils.APIError
+		if errors.As(err, &apiErr) {
+			return nil, fmt.Errorf("openai: chat completions request failed: %s", apiErr.Detail())
+		}
 		return nil, fmt.Errorf("openai: chat completions request failed: %w", err)
 	}
 
@@ -541,7 +545,12 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 		})
 
 		if err != nil {
-			send(&sdk.ErrorPart{Error: fmt.Errorf("openai: stream failed: %w", err)})
+			var apiErr *utils.APIError
+			if errors.As(err, &apiErr) {
+				send(&sdk.ErrorPart{Error: fmt.Errorf("openai: stream failed: %s", apiErr.Detail())})
+			} else {
+				send(&sdk.ErrorPart{Error: fmt.Errorf("openai: stream failed: %w", err)})
+			}
 		}
 
 		flush()

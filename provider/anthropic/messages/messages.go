@@ -189,6 +189,10 @@ func (p *Provider) DoGenerate(ctx context.Context, params sdk.GenerateParams) (*
 		Body:    req,
 	})
 	if err != nil {
+		var apiErr *utils.APIError
+		if errors.As(err, &apiErr) {
+			return nil, fmt.Errorf("anthropic: messages request failed: %s", apiErr.Detail())
+		}
 		return nil, fmt.Errorf("anthropic: messages request failed: %w", err)
 	}
 
@@ -465,7 +469,12 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 		}, h.handleEvent)
 
 		if err != nil {
-			h.send(&sdk.ErrorPart{Error: fmt.Errorf("anthropic: stream failed: %w", err)})
+			var apiErr *utils.APIError
+			if errors.As(err, &apiErr) {
+				h.send(&sdk.ErrorPart{Error: fmt.Errorf("anthropic: stream failed: %s", apiErr.Detail())})
+			} else {
+				h.send(&sdk.ErrorPart{Error: fmt.Errorf("anthropic: stream failed: %w", err)})
+			}
 		}
 
 		h.send(&sdk.FinishPart{

@@ -33,6 +33,22 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("api error %d: %s", e.StatusCode, e.Status)
 }
 
+// Detail returns the error message with the raw response body appended
+// when available, useful for diagnosing opaque upstream errors like
+// "Provider returned error".
+func (e *APIError) Detail() string {
+	base := e.Error()
+	if len(e.RawBody) == 0 {
+		return base
+	}
+	const maxBody = 1024
+	body := string(e.RawBody)
+	if len(body) > maxBody {
+		body = body[:maxBody] + "...(truncated)"
+	}
+	return fmt.Sprintf("%s [body: %s]", base, body)
+}
+
 func BuildRequest(ctx context.Context, opts *RequestOptions) (*http.Request, error) {
 	fullURL, err := buildURL(opts.BaseURL, opts.Path, opts.Query)
 	if err != nil {
