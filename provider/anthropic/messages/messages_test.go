@@ -90,6 +90,95 @@ func TestDoGenerate(t *testing.T) {
 	}
 }
 
+func TestDoGenerate_DefaultMaxTokens(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			MaxTokens int `json:"max_tokens"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if body.MaxTokens != 4096 {
+			t.Fatalf("max_tokens: got %d, want 4096", body.MaxTokens)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id": "msg_default_max", "type": "message", "model": "claude-sonnet-4-20250514", "role": "assistant",
+			"content":     []map[string]any{{"type": "text", "text": "OK"}},
+			"stop_reason": "end_turn",
+			"usage":       map[string]any{"input_tokens": 5, "output_tokens": 2},
+		})
+	}))
+	defer srv.Close()
+
+	p := messages.New(messages.WithAPIKey("test-key"), messages.WithBaseURL(srv.URL))
+
+	result, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model:    &sdk.Model{ID: "claude-sonnet-4-20250514"},
+		Messages: []sdk.Message{sdk.UserMessage("Hi")},
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate failed: %v", err)
+	}
+	if result.Text != "OK" {
+		t.Errorf("text: got %q", result.Text)
+	}
+}
+
+func TestDoGenerate_DefaultMaxTokens_ThinkingBudgetReserveAnswerBudget(t *testing.T) {
+	const budgetTokens = 50000
+	const answerTokens = 4096
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			MaxTokens int `json:"max_tokens"`
+			Thinking  struct {
+				Type         string `json:"type"`
+				BudgetTokens int    `json:"budget_tokens"`
+			} `json:"thinking"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if body.MaxTokens != budgetTokens+answerTokens {
+			t.Fatalf("max_tokens: got %d, want %d", body.MaxTokens, budgetTokens+answerTokens)
+		}
+		if body.Thinking.Type != "enabled" || body.Thinking.BudgetTokens != budgetTokens {
+			t.Fatalf("thinking: got %+v", body.Thinking)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id": "msg_default_thinking_max", "type": "message", "model": "claude-sonnet-4-20250514", "role": "assistant",
+			"content":     []map[string]any{{"type": "text", "text": "OK"}},
+			"stop_reason": "end_turn",
+			"usage":       map[string]any{"input_tokens": 5, "output_tokens": 2},
+		})
+	}))
+	defer srv.Close()
+
+	p := messages.New(
+		messages.WithAPIKey("test-key"),
+		messages.WithBaseURL(srv.URL),
+		messages.WithThinking(messages.ThinkingConfig{
+			Type:         "enabled",
+			BudgetTokens: budgetTokens,
+		}),
+	)
+
+	result, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model:    &sdk.Model{ID: "claude-sonnet-4-20250514"},
+		Messages: []sdk.Message{sdk.UserMessage("Hi")},
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate failed: %v", err)
+	}
+	if result.Text != "OK" {
+		t.Errorf("text: got %q", result.Text)
+	}
+}
+
 func TestDoGenerate_SystemMessage(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {

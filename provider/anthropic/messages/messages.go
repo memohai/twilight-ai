@@ -15,6 +15,7 @@ import (
 const (
 	defaultBaseURL      = "https://api.anthropic.com/v1"
 	defaultAnthropicVer = "2023-06-01"
+	defaultMaxTokens    = 4096
 
 	// Content block types for Anthropic API
 	blockTypeText     = "text"
@@ -208,7 +209,7 @@ func (p *Provider) buildRequest(params *sdk.GenerateParams) *messagesRequest {
 		Model:       params.Model.ID,
 		System:      system,
 		Messages:    messages,
-		MaxTokens:   params.MaxTokens,
+		MaxTokens:   resolveMaxTokens(params, p.thinking),
 		Temperature: params.Temperature,
 		TopP:        params.TopP,
 	}
@@ -229,6 +230,19 @@ func (p *Provider) buildRequest(params *sdk.GenerateParams) *messagesRequest {
 	}
 
 	return req
+}
+
+func resolveMaxTokens(params *sdk.GenerateParams, thinking *ThinkingConfig) *int {
+	if params.MaxTokens != nil {
+		return params.MaxTokens
+	}
+
+	maxTokens := defaultMaxTokens
+	if thinking != nil && thinking.Type != "" && thinking.Type != "disabled" && thinking.BudgetTokens > 0 {
+		maxTokens += thinking.BudgetTokens
+	}
+
+	return &maxTokens
 }
 
 func convertTools(tools []sdk.Tool) []anthropicTool {
