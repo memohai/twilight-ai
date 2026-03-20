@@ -93,7 +93,7 @@ func (p ToolResultPart) PartType() MessagePartType { return MessagePartTypeToolR
 type Message struct {
 	Role    MessageRole   `json:"role"`
 	Content []MessagePart `json:"content"`
-	Usage   *Usage        `json:"-"`
+	Usage   *Usage        `json:"usage,omitempty"`
 }
 
 // --- Convenience constructors ---
