@@ -637,6 +637,176 @@ These use the default client instance, equivalent to `client.Embed` and `client.
 
 ---
 
+### Speech
+
+#### SpeechProvider
+
+```go
+type SpeechProvider interface {
+    DoSynthesize(ctx context.Context, params SpeechParams) (*SpeechResult, error)
+    DoStream(ctx context.Context, params SpeechParams) (*SpeechStreamResult, error)
+}
+```
+
+The interface that speech synthesis backends must implement.
+
+#### SpeechModel
+
+```go
+type SpeechModel struct {
+    ID       string
+    Provider SpeechProvider
+}
+```
+
+Represents a speech model bound to a `SpeechProvider`.
+
+#### SpeechParams
+
+```go
+type SpeechParams struct {
+    Model  *SpeechModel
+    Text   string
+    Config map[string]any
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `Model` | **Required.** The speech model to use |
+| `Text` | **Required.** The text to synthesize |
+| `Config` | Provider-specific configuration (e.g. voice, format, speed) |
+
+#### SpeechResult
+
+```go
+type SpeechResult struct {
+    Audio       []byte
+    ContentType string
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `Audio` | Raw audio bytes |
+| `ContentType` | MIME type (e.g. `audio/mpeg`) |
+
+#### SpeechStreamResult
+
+```go
+type SpeechStreamResult struct {
+    Stream      <-chan []byte
+    ContentType string
+}
+
+func (r *SpeechStreamResult) Bytes() ([]byte, error)
+```
+
+| Field/Method | Description |
+|-------|-------------|
+| `Stream` | Channel that yields raw audio chunks; closed when done |
+| `ContentType` | MIME type (e.g. `audio/mpeg`) |
+| `Bytes()` | Consumes the stream and returns concatenated audio data |
+
+#### Speech Options
+
+All options are of type `SpeechOption` (`func(*speechConfig)`).
+
+| Function | Description |
+|----------|-------------|
+| `WithSpeechModel(model *SpeechModel)` | **Required.** The speech model to use |
+| `WithText(text string)` | **Required.** The text to synthesize |
+| `WithSpeechConfig(cfg map[string]any)` | Provider-specific configuration |
+
+#### Client Methods
+
+```go
+func (c *Client) GenerateSpeech(ctx context.Context, options ...SpeechOption) (*SpeechResult, error)
+func (c *Client) StreamSpeech(ctx context.Context, options ...SpeechOption) (*SpeechStreamResult, error)
+```
+
+| Method | Description |
+|--------|-------------|
+| `GenerateSpeech` | Synthesizes speech; returns complete audio |
+| `StreamSpeech` | Synthesizes speech; returns streaming audio chunks |
+
+#### Package-Level Functions
+
+```go
+func GenerateSpeech(ctx context.Context, options ...SpeechOption) (*SpeechResult, error)
+func StreamSpeech(ctx context.Context, options ...SpeechOption) (*SpeechStreamResult, error)
+```
+
+These use the default client instance.
+
+---
+
+## Package `provider/edge/speech`
+
+### Provider
+
+```go
+type Provider struct { /* unexported */ }
+
+func New(options ...Option) *Provider
+```
+
+Implements `sdk.SpeechProvider`. Uses Microsoft Edge's built-in TTS via WebSocket. No API key required.
+
+#### Options
+
+```go
+type Option func(*Provider)
+
+func WithBaseURL(url string) Option
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `WithBaseURL(url)` | Bing WSS endpoint | Override the WebSocket endpoint (for testing) |
+
+#### Methods
+
+```go
+func (p *Provider) SpeechModel(id string) *sdk.SpeechModel
+func (p *Provider) DoSynthesize(ctx context.Context, params sdk.SpeechParams) (*sdk.SpeechResult, error)
+func (p *Provider) DoStream(ctx context.Context, params sdk.SpeechParams) (*sdk.SpeechStreamResult, error)
+```
+
+| Method | Description |
+|--------|-------------|
+| `SpeechModel(id)` | Creates a `SpeechModel` bound to this provider. Default model: `edge-read-aloud` |
+| `DoSynthesize` | Synthesizes complete audio via WebSocket |
+| `DoStream` | Synthesizes streaming audio chunks via WebSocket |
+
+#### Configuration Keys
+
+The Edge provider reads these keys from `SpeechParams.Config`:
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `voice` | `string` | `en-US-EmmaMultilingualNeural` | Voice ID |
+| `language` | `string` | Auto-detected | BCP-47 language tag |
+| `format` | `string` | `audio-24khz-48kbitrate-mono-mp3` | Output format |
+| `speed` | `float64` | `0` | Speech rate (1.0 = normal) |
+| `pitch` | `float64` | `0` | Pitch in Hz |
+
+#### Package-Level Variables
+
+```go
+var EdgeTTSVoices map[string][]string  // language tag → voice IDs
+```
+
+#### Helper Functions
+
+```go
+func LookupVoiceLang(voiceID string) (string, bool)
+```
+
+Returns the language tag for a voice ID, or `("", false)` if unknown.
+
+---
+
 ## Package `provider/openai/embedding`
 
 ### Provider

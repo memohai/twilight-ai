@@ -166,7 +166,39 @@ testResult, _ := model.Test(ctx)
 fmt.Println(testResult.Supported) // true or false
 ```
 
-### 6. Generate Embeddings
+### 6. Generate Speech
+
+Speech synthesis converts text to audio. Speech providers are separate from chat providers:
+
+```go
+import "github.com/memohai/twilight-ai/provider/edge/speech"
+
+speechProvider := speech.New()
+speechModel := speechProvider.SpeechModel("edge-read-aloud")
+
+result, err := sdk.GenerateSpeech(ctx,
+    sdk.WithSpeechModel(speechModel),
+    sdk.WithText("Hello, this is a speech test."),
+    sdk.WithSpeechConfig(map[string]any{
+        "voice": "en-US-EmmaMultilingualNeural",
+    }),
+)
+// result.Audio is []byte (raw audio data)
+// result.ContentType is "audio/mpeg"
+
+// Or stream for low-latency playback:
+sr, err := sdk.StreamSpeech(ctx,
+    sdk.WithSpeechModel(speechModel),
+    sdk.WithText("Streaming speech synthesis."),
+)
+for chunk := range sr.Stream {
+    // write each chunk...
+}
+```
+
+Edge TTS is free and requires no API key. See [Speech](speech.md) for all available voices and configuration options.
+
+### 7. Generate Embeddings
 
 Embeddings convert text into numeric vectors for search, retrieval, and similarity comparison. Embedding providers are separate from chat providers:
 
@@ -232,6 +264,7 @@ OPENAI_MODEL=gpt-4o-mini
 
 - [Providers](providers.md) — learn about the Provider interface and OpenAI options
 - [Embeddings](embeddings.md) — generate vector embeddings with OpenAI and Google
+- [Speech](speech.md) — speech synthesis with Edge TTS and custom providers
 - [Tool Calling](tools.md) — define tools and enable multi-step execution
 - [Streaming](streaming.md) — understand StreamPart types and advanced patterns
 - [API Reference](api-reference.md) — complete type and function reference

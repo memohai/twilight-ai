@@ -7,8 +7,8 @@ A lightweight, idiomatic AI SDK for Go — inspired by [Vercel AI SDK](https://s
 
 ## Features
 
-- **Simple API** — `GenerateText`, `StreamText`, `Embed`, and `EmbedMany` cover most use cases
-- **Provider-agnostic** — swap between OpenAI, Anthropic, Google, or any OpenAI-compatible endpoint
+- **Simple API** — `GenerateText`, `StreamText`, `Embed`, `EmbedMany`, `GenerateSpeech`, and `StreamSpeech` cover most use cases
+- **Provider-agnostic** — swap between OpenAI, Anthropic, Google, Edge TTS, or any OpenAI-compatible endpoint
 - **Model discovery** — `ListModels` fetches available models, `Test` checks provider connectivity and model support
 - **Tool calling** — define tools with Go structs, SDK infers JSON Schema and handles multi-step execution
 - **MCP support** — connect to MCP servers and expose remote MCP tools as Twilight AI `sdk.Tool` values
@@ -16,6 +16,7 @@ A lightweight, idiomatic AI SDK for Go — inspired by [Vercel AI SDK](https://s
 - **Multi-step execution** — automatic tool-call loop with configurable `MaxSteps`
 - **Rich message types** — text, images, files, reasoning content, tool calls/results
 - **Embeddings** — generate embeddings with `Embed` / `EmbedMany`, supports OpenAI and Google providers
+- **Speech synthesis** — generate speech with `GenerateSpeech` / `StreamSpeech`, supports Edge TTS with an open provider model
 - **Approval flow** — optional human-in-the-loop approval for sensitive tool calls
 
 ## Installation
@@ -285,6 +286,43 @@ model := provider.EmbeddingModel("gemini-embedding-001")
 vec, err := sdk.Embed(ctx, "Hello world", sdk.WithEmbeddingModel(model))
 ```
 
+### Speech Synthesis
+
+Generate speech audio from text using Edge TTS (free, no API key required):
+
+```go
+import "github.com/memohai/twilight-ai/provider/edge/speech"
+
+provider := speech.New()
+model := provider.SpeechModel("edge-read-aloud")
+
+// Generate complete audio
+result, err := sdk.GenerateSpeech(ctx,
+    sdk.WithSpeechModel(model),
+    sdk.WithText("Hello, world!"),
+    sdk.WithSpeechConfig(map[string]any{
+        "voice": "en-US-EmmaMultilingualNeural",
+        "speed": 1.0,
+    }),
+)
+// result.Audio is []byte, result.ContentType is "audio/mpeg"
+```
+
+Stream audio chunks for low-latency playback:
+
+```go
+sr, err := sdk.StreamSpeech(ctx,
+    sdk.WithSpeechModel(model),
+    sdk.WithText("你好，这是流式语音合成。"),
+    sdk.WithSpeechConfig(map[string]any{
+        "voice": "zh-CN-XiaoxiaoNeural",
+    }),
+)
+for chunk := range sr.Stream {
+    // write chunk to audio player or file
+}
+```
+
 ### Provider Health Check & Model Discovery
 
 Test connectivity and discover available models before making generation requests:
@@ -324,6 +362,7 @@ if testResult.Supported {
 | [Getting Started](docs/getting-started.md) | Installation, setup, and first request |
 | [Providers](docs/providers.md) | Provider interface, OpenAI, Anthropic, and Google Gemini |
 | [Embeddings](docs/embeddings.md) | Generate vector embeddings with OpenAI and Google |
+| [Speech](docs/speech.md) | Speech synthesis with Edge TTS and custom providers |
 | [Tool Calling](docs/tools.md) | Defining local tools, MCP tools, multi-step execution, approval flow |
 | [Streaming](docs/streaming.md) | Channel-based streaming and StreamPart types |
 | [API Reference](docs/api-reference.md) | Complete type and function reference |
@@ -340,6 +379,7 @@ if testResult.Supported {
 | Google Gemini | `generativeai.New()` | Generative AI API | ✅ Stable |
 | OpenAI Embeddings | `embedding.New()` | `/embeddings` | ✅ Stable |
 | Google Embeddings | `embedding.New()` | `embedContent` / `batchEmbedContents` | ✅ Stable |
+| Edge TTS | `speech.New()` | Bing WebSocket | ✅ Stable |
 
 ## License
 

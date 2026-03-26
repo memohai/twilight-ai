@@ -13,7 +13,6 @@ type Model struct {
 	DisplayName string
 	Provider    Provider
 	Type        ModelType
-	MaxTokens   int
 }
 
 // Test checks whether this model is supported by its provider.

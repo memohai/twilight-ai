@@ -34,4 +34,14 @@ func EmbedMany(ctx context.Context, values []string, options ...EmbedOption) (*E
 	return defaultClient.EmbedMany(ctx, values, options...)
 }
 
+// --- Speech convenience functions ---
+
+func GenerateSpeech(ctx context.Context, options ...SpeechOption) (*SpeechResult, error) {
+	return defaultClient.GenerateSpeech(ctx, options...)
+}
+
+func StreamSpeech(ctx context.Context, options ...SpeechOption) (*SpeechStreamResult, error) {
+	return defaultClient.StreamSpeech(ctx, options...)
+}
+
 var defaultClient = &Client{}

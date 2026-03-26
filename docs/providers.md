@@ -552,6 +552,64 @@ The provider automatically selects the optimal endpoint based on the number of i
 
 ---
 
+## Speech Providers
+
+Speech providers implement the `sdk.SpeechProvider` interface and are separate from chat and embedding providers. They convert text into audio.
+
+```go
+type SpeechProvider interface {
+    DoSynthesize(ctx context.Context, params SpeechParams) (*SpeechResult, error)
+    DoStream(ctx context.Context, params SpeechParams) (*SpeechStreamResult, error)
+}
+```
+
+Speech uses an open-ended `Config map[string]any` in `SpeechParams`, allowing each provider to define its own configuration keys.
+
+### Edge TTS Provider
+
+The `provider/edge/speech` package provides free speech synthesis via Microsoft Edge's built-in TTS service. No API key required.
+
+#### Basic Usage
+
+```go
+import (
+    "github.com/memohai/twilight-ai/provider/edge/speech"
+    "github.com/memohai/twilight-ai/sdk"
+)
+
+provider := speech.New()
+model := provider.SpeechModel("edge-read-aloud")
+
+result, err := sdk.GenerateSpeech(ctx,
+    sdk.WithSpeechModel(model),
+    sdk.WithText("Hello, world!"),
+    sdk.WithSpeechConfig(map[string]any{
+        "voice": "en-US-EmmaMultilingualNeural",
+        "speed": 1.0,
+    }),
+)
+```
+
+#### Configuration Keys
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `voice` | `string` | `en-US-EmmaMultilingualNeural` | Edge TTS voice ID |
+| `language` | `string` | Auto-detected from voice | BCP-47 language tag |
+| `format` | `string` | `audio-24khz-48kbitrate-mono-mp3` | Output audio format |
+| `speed` | `float64` | `0` (server default) | Speech rate (1.0 = normal) |
+| `pitch` | `float64` | `0` | Pitch adjustment in Hz |
+
+#### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `WithBaseURL(url)` | Bing WSS endpoint | Override WebSocket endpoint (for testing) |
+
+See [Speech](speech.md) for complete documentation including voices, streaming, and custom provider implementation.
+
+---
+
 ## Implementing a Custom Provider
 
 To add support for a new AI backend, implement the `sdk.Provider` interface:
@@ -655,6 +713,7 @@ text, err := sdk.GenerateText(ctx,
 ## Next Steps
 
 - [Embeddings](embeddings.md) — generate vector embeddings with OpenAI and Google
+- [Speech](speech.md) — speech synthesis with Edge TTS and custom providers
 - [Tool Calling](tools.md) — define tools and enable multi-step execution
 - [Streaming](streaming.md) — understand StreamPart types
 - [API Reference](api-reference.md) — complete type and function reference
