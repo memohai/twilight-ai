@@ -129,6 +129,9 @@ type responsesOutputItem struct {
 	CallID    string `json:"call_id,omitempty"`
 	Name      string `json:"name,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
+
+	// type: "image_generation_call"
+	Result string `json:"result,omitempty"`
 }
 
 type responsesOutputContent struct {
@@ -248,6 +251,13 @@ type responsesErrorChunk struct {
 		Code    string `json:"code"`
 		Message string `json:"message"`
 	} `json:"error"`
+}
+
+// responsesImageGenCompletedChunk is sent for event: response.image_generation_call.completed
+type responsesImageGenCompletedChunk struct {
+	Type   string `json:"type"`
+	ItemID string `json:"item_id"`
+	Result string `json:"result"` // base64-encoded image data
 }
 
 // --- Models API response types ---

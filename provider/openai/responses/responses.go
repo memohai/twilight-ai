@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/memohai/twilight-ai/internal/utils"
@@ -16,9 +17,10 @@ const (
 	defaultBaseURL = "https://api.openai.com/v1"
 
 	// Output item types for OpenAI Responses API
-	outputTypeMessage      = "message"
-	outputTypeReasoning    = "reasoning"
-	outputTypeFunctionCall = "function_call"
+	outputTypeMessage         = "message"
+	outputTypeReasoning       = "reasoning"
+	outputTypeFunctionCall    = "function_call"
+	outputTypeImageGeneration = "image_generation_call"
 )
 
 type Provider struct {
@@ -419,6 +421,14 @@ func (p *Provider) parseResponse(resp *responsesResponse) (*sdk.GenerateResult, 
 				ToolName:   item.Name,
 				Input:      input,
 			})
+
+		case outputTypeImageGeneration:
+			if data := strings.TrimSpace(item.Result); data != "" {
+				result.Files = append(result.Files, sdk.GeneratedFile{
+					Data:      data,
+					MediaType: "image/png",
+				})
+			}
 		}
 	}
 
@@ -654,6 +664,28 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 							ID:         generateID(),
 							URL:        chunk.Annotation.URL,
 							Title:      chunk.Annotation.Title,
+						},
+					})
+				}
+
+			case "response.image_generation_call.completed":
+				var chunk responsesImageGenCompletedChunk
+				if err := json.Unmarshal([]byte(ev.Data), &chunk); err != nil {
+					return nil
+				}
+				if data := strings.TrimSpace(chunk.Result); data != "" {
+					if textStartSent {
+						send(&sdk.TextEndPart{ID: responseID})
+						textStartSent = false
+					}
+					if reasoningStartSent {
+						send(&sdk.ReasoningEndPart{ID: responseID})
+						reasoningStartSent = false
+					}
+					send(&sdk.StreamFilePart{
+						File: sdk.GeneratedFile{
+							Data:      data,
+							MediaType: "image/png",
 						},
 					})
 				}
