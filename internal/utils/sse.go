@@ -59,6 +59,7 @@ func FetchSSE(ctx context.Context, client *http.Client, opts *RequestOptions, on
 	}
 
 	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
 	event := &SSEEvent{}
 	var dataLines []string
 
