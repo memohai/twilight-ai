@@ -223,8 +223,7 @@ func TestConvertInputSchema(t *testing.T) {
 		}
 		if s == nil {
 			t.Fatal("expected non-nil schema")
-		}
-		if s.Type != "object" {
+		} else if s.Type != "object" {
 			t.Errorf("type = %q, want %q", s.Type, "object")
 		}
 	})

@@ -634,8 +634,7 @@ func TestDoStream_ToolCall(t *testing.T) {
 	}
 	if gotToolCall == nil {
 		t.Fatal("missing StreamToolCallPart")
-	}
-	if gotToolCall.ToolName != "get_weather" {
+	} else if gotToolCall.ToolName != "get_weather" {
 		t.Errorf("tool call name: got %q", gotToolCall.ToolName)
 	}
 	input, ok := gotToolCall.Input.(map[string]any)
