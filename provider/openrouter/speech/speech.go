@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 
@@ -35,7 +36,7 @@ const (
 	contentTypeAudio = "audio/wav"
 
 	// pcmSampleRate is the sample rate used by OpenRouter's pcm16 format.
-	pcmSampleRate = 24000
+	pcmSampleRate uint32 = 24000
 )
 
 // Option configures the OpenRouter speech provider.
@@ -242,14 +243,18 @@ func decodePCMChunks(chunks []string) ([]byte, error) {
 }
 
 // buildWAV wraps raw PCM-16 mono data in a standard 44-byte WAV container.
-func buildWAV(pcm []byte, sampleRate int) []byte {
+func buildWAV(pcm []byte, sampleRate uint32) []byte {
 	const (
-		numChannels  = 1
-		bitsPerSample = 16
+		numChannels   uint32 = 1
+		bitsPerSample uint32 = 16
 	)
-	byteRate := uint32(sampleRate * numChannels * bitsPerSample / 8) //nolint:gosec // sampleRate is a small provider constant
+	byteRate := sampleRate * numChannels * bitsPerSample / 8
 	blockAlign := uint16(numChannels * bitsPerSample / 8)
-	dataSize := uint32(len(pcm)) //nolint:gosec // audio payload is bounded in practice
+	n := len(pcm)
+	if n < 0 || n > math.MaxUint32 {
+		n = math.MaxUint32
+	}
+	dataSize := uint32(n)
 	chunkSize := 36 + dataSize
 
 	buf := new(bytes.Buffer)
@@ -258,10 +263,10 @@ func buildWAV(pcm []byte, sampleRate int) []byte {
 	buf.WriteString("WAVE")
 
 	buf.WriteString("fmt ")
-	_ = binary.Write(buf, binary.LittleEndian, uint32(16))          // sub-chunk size
-	_ = binary.Write(buf, binary.LittleEndian, uint16(1))           // PCM format
+	_ = binary.Write(buf, binary.LittleEndian, uint32(16))
+	_ = binary.Write(buf, binary.LittleEndian, uint16(1))
 	_ = binary.Write(buf, binary.LittleEndian, uint16(numChannels))
-	_ = binary.Write(buf, binary.LittleEndian, uint32(sampleRate)) //nolint:gosec // sampleRate is a small provider constant
+	_ = binary.Write(buf, binary.LittleEndian, sampleRate)
 	_ = binary.Write(buf, binary.LittleEndian, byteRate)
 	_ = binary.Write(buf, binary.LittleEndian, blockAlign)
 	_ = binary.Write(buf, binary.LittleEndian, uint16(bitsPerSample))
