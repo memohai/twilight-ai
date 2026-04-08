@@ -48,6 +48,7 @@ func (c *wsClient) dial(ctx context.Context) (*websocket.Conn, error) {
 	conn, resp, err := websocket.DefaultDialer.DialContext(ctx, c.baseURL, h)
 	if err != nil {
 		if resp != nil {
+			_ = resp.Body.Close()
 			return nil, fmt.Errorf("alibabacloud speech: ws dial: status=%d: %w", resp.StatusCode, err)
 		}
 		return nil, fmt.Errorf("alibabacloud speech: ws dial: %w", err)
@@ -56,7 +57,7 @@ func (c *wsClient) dial(ctx context.Context) (*websocket.Conn, error) {
 }
 
 // synthesize runs a full CosyVoice synthesis session and returns all audio bytes.
-func (c *wsClient) synthesize(ctx context.Context, text string, cfg audioConfig) ([]byte, error) {
+func (c *wsClient) synthesize(ctx context.Context, text string, cfg *audioConfig) ([]byte, error) {
 	conn, err := c.dial(ctx)
 	if err != nil {
 		return nil, err
@@ -115,17 +116,19 @@ func (c *wsClient) synthesize(ctx context.Context, text string, cfg audioConfig)
 }
 
 // stream runs a CosyVoice synthesis session, pushing audio chunks to the returned channel.
-func (c *wsClient) stream(ctx context.Context, text string, cfg audioConfig) (<-chan []byte, <-chan error) {
-	ch := make(chan []byte, 8)
-	errCh := make(chan error, 1)
+func (c *wsClient) stream(ctx context.Context, text string, cfg *audioConfig) (ch <-chan []byte, errCh <-chan error) {
+	dataCh := make(chan []byte, 8)
+	errChan := make(chan error, 1)
+	ch = dataCh
+	errCh = errChan
 
 	go func() {
-		defer close(ch)
-		defer close(errCh)
+		defer close(dataCh)
+		defer close(errChan)
 
 		conn, err := c.dial(ctx)
 		if err != nil {
-			errCh <- err
+			errChan <- err
 			return
 		}
 		defer conn.Close()
@@ -133,14 +136,14 @@ func (c *wsClient) stream(ctx context.Context, text string, cfg audioConfig) (<-
 		taskID := uuid.New().String()
 
 		if err := c.sendRunTask(conn, taskID, cfg); err != nil {
-			errCh <- err
+			errChan <- err
 			return
 		}
 
 		for {
 			select {
 			case <-ctx.Done():
-				errCh <- ctx.Err()
+				errChan <- ctx.Err()
 				return
 			default:
 			}
@@ -148,7 +151,7 @@ func (c *wsClient) stream(ctx context.Context, text string, cfg audioConfig) (<-
 			mt, data, readErr := conn.ReadMessage()
 			if readErr != nil {
 				if !websocket.IsCloseError(readErr, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
-					errCh <- fmt.Errorf("alibabacloud speech: read: %w", readErr)
+					errChan <- fmt.Errorf("alibabacloud speech: read: %w", readErr)
 				}
 				return
 			}
@@ -157,9 +160,9 @@ func (c *wsClient) stream(ctx context.Context, text string, cfg audioConfig) (<-
 			case websocket.BinaryMessage:
 				if len(data) > 0 {
 					select {
-					case ch <- data:
+					case dataCh <- data:
 					case <-ctx.Done():
-						errCh <- ctx.Err()
+						errChan <- ctx.Err()
 						return
 					}
 				}
@@ -172,11 +175,11 @@ func (c *wsClient) stream(ctx context.Context, text string, cfg audioConfig) (<-
 				switch event {
 				case "task-started":
 					if err := c.sendContinueTask(conn, taskID, text); err != nil {
-						errCh <- err
+						errChan <- err
 						return
 					}
 					if err := c.sendFinishTask(conn, taskID); err != nil {
-						errCh <- err
+						errChan <- err
 						return
 					}
 
@@ -184,7 +187,7 @@ func (c *wsClient) stream(ctx context.Context, text string, cfg audioConfig) (<-
 					return
 
 				case "task-failed":
-					errCh <- fmt.Errorf("alibabacloud speech: task-failed: %s", string(data))
+					errChan <- fmt.Errorf("alibabacloud speech: task-failed: %s", string(data))
 					return
 				}
 			}
@@ -194,7 +197,7 @@ func (c *wsClient) stream(ctx context.Context, text string, cfg audioConfig) (<-
 	return ch, errCh
 }
 
-func (c *wsClient) sendRunTask(conn *websocket.Conn, taskID string, cfg audioConfig) error {
+func (c *wsClient) sendRunTask(conn *websocket.Conn, taskID string, cfg *audioConfig) error {
 	params := map[string]any{
 		"text_type":   "PlainText",
 		"format":      cfg.Format,

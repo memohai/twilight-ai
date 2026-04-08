@@ -88,7 +88,7 @@ type t2aResponse struct {
 func (p *Provider) DoSynthesize(ctx context.Context, params sdk.SpeechParams) (*sdk.SpeechResult, error) {
 	cfg := parseConfig(params.Config)
 
-	audio, err := p.synthesize(ctx, params.Text, cfg)
+	audio, err := p.synthesize(ctx, params.Text, &cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +103,7 @@ func (p *Provider) DoSynthesize(ctx context.Context, params sdk.SpeechParams) (*
 func (p *Provider) DoStream(ctx context.Context, params sdk.SpeechParams) (*sdk.SpeechStreamResult, error) {
 	cfg := parseConfig(params.Config)
 
-	audio, err := p.synthesize(ctx, params.Text, cfg)
+	audio, err := p.synthesize(ctx, params.Text, &cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +119,7 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.SpeechParams) (*sdk.
 }
 
 // synthesize calls the MiniMax API and returns decoded audio bytes.
-func (p *Provider) synthesize(ctx context.Context, text string, cfg audioConfig) ([]byte, error) {
+func (p *Provider) synthesize(ctx context.Context, text string, cfg *audioConfig) ([]byte, error) {
 	// speed, vol, pitch are always sent with their defaults (1.0, 1.0, 0) so the
 	// server receives explicit values rather than relying on its own defaults.
 	voiceSetting := map[string]any{

@@ -14,20 +14,22 @@ import (
 //
 //	ch, errCh := utils.StreamHTTPBody(ctx, resp.Body, "myprovider speech")
 //	return sdk.NewSpeechStreamResult(ch, contentType, errCh), nil
-func StreamHTTPBody(ctx context.Context, body io.ReadCloser, prefix string) (<-chan []byte, <-chan error) {
-	ch := make(chan []byte, 8)
-	errCh := make(chan error, 1)
+func StreamHTTPBody(ctx context.Context, body io.ReadCloser, prefix string) (ch <-chan []byte, errCh <-chan error) {
+	dataCh := make(chan []byte, 8)
+	errChan := make(chan error, 1)
+	ch = dataCh
+	errCh = errChan
 
 	go func() {
 		defer body.Close()
-		defer close(ch)
-		defer close(errCh)
+		defer close(dataCh)
+		defer close(errChan)
 
 		buf := make([]byte, 32*1024)
 		for {
 			select {
 			case <-ctx.Done():
-				errCh <- ctx.Err()
+				errChan <- ctx.Err()
 				return
 			default:
 			}
@@ -36,9 +38,9 @@ func StreamHTTPBody(ctx context.Context, body io.ReadCloser, prefix string) (<-c
 				chunk := make([]byte, n)
 				copy(chunk, buf[:n])
 				select {
-				case ch <- chunk:
+				case dataCh <- chunk:
 				case <-ctx.Done():
-					errCh <- ctx.Err()
+					errChan <- ctx.Err()
 					return
 				}
 			}
@@ -46,7 +48,7 @@ func StreamHTTPBody(ctx context.Context, body io.ReadCloser, prefix string) (<-c
 				return
 			}
 			if readErr != nil {
-				errCh <- fmt.Errorf("%s: stream read: %w", prefix, readErr)
+				errChan <- fmt.Errorf("%s: stream read: %w", prefix, readErr)
 				return
 			}
 		}

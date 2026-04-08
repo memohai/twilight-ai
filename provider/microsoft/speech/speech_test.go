@@ -137,7 +137,7 @@ func TestBuildSSML(t *testing.T) {
 
 	t.Run("simple", func(t *testing.T) {
 		t.Parallel()
-		ssml := buildSSML("Hello", audioConfig{
+		ssml := buildSSML("Hello", &audioConfig{
 			Voice:    "en-US-JennyNeural",
 			Language: "en-US",
 		})
@@ -151,7 +151,7 @@ func TestBuildSSML(t *testing.T) {
 
 	t.Run("xml_escape", func(t *testing.T) {
 		t.Parallel()
-		ssml := buildSSML("a & b < c > d", audioConfig{Voice: "en-US-JennyNeural"})
+		ssml := buildSSML("a & b < c > d", &audioConfig{Voice: "en-US-JennyNeural"})
 		if !strings.Contains(ssml, "a &amp; b &lt; c &gt; d") {
 			t.Errorf("SSML XML escaping failed: %s", ssml)
 		}
@@ -159,7 +159,7 @@ func TestBuildSSML(t *testing.T) {
 
 	t.Run("with_style", func(t *testing.T) {
 		t.Parallel()
-		ssml := buildSSML("Hi", audioConfig{Voice: "zh-CN-XiaoxiaoNeural", Style: "cheerful"})
+		ssml := buildSSML("Hi", &audioConfig{Voice: "zh-CN-XiaoxiaoNeural", Style: "cheerful"})
 		if !strings.Contains(ssml, `style="cheerful"`) {
 			t.Errorf("SSML missing style: %s", ssml)
 		}
@@ -167,7 +167,7 @@ func TestBuildSSML(t *testing.T) {
 
 	t.Run("with_rate_pitch", func(t *testing.T) {
 		t.Parallel()
-		ssml := buildSSML("Test", audioConfig{Voice: "en-US-JennyNeural", Rate: "+10%", Pitch: "+5Hz"})
+		ssml := buildSSML("Test", &audioConfig{Voice: "en-US-JennyNeural", Rate: "+10%", Pitch: "+5Hz"})
 		if !strings.Contains(ssml, `rate="+10%"`) {
 			t.Errorf("SSML missing rate: %s", ssml)
 		}
@@ -189,7 +189,7 @@ func TestLanguageFor(t *testing.T) {
 		{audioConfig{Voice: "en-US-JennyNeural", Language: "fr-FR"}, "fr-FR"},
 	}
 	for _, tc := range cases {
-		got := languageFor(tc.cfg)
+		got := languageFor(&tc.cfg)
 		if got != tc.want {
 			t.Errorf("languageFor(%v) = %q, want %q", tc.cfg.Voice, got, tc.want)
 		}

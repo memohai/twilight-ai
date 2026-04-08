@@ -34,8 +34,8 @@ func WithAPIKey(key string) Option {
 }
 
 // WithBaseURL overrides the API base URL (useful for testing).
-func WithBaseURL(url string) Option {
-	return func(p *Provider) { p.baseURL = url }
+func WithBaseURL(rawURL string) Option {
+	return func(p *Provider) { p.baseURL = rawURL }
 }
 
 // WithHTTPClient replaces the default HTTP client.
@@ -80,7 +80,7 @@ func (p *Provider) DoSynthesize(ctx context.Context, params sdk.SpeechParams) (*
 	}
 
 	endpoint := p.baseURL + "/v1/text-to-speech/" + cfg.VoiceID
-	body, err := p.doRequest(ctx, endpoint, params.Text, cfg)
+	body, err := p.doRequest(ctx, endpoint, params.Text, &cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +105,7 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.SpeechParams) (*sdk.
 	}
 
 	endpoint := p.baseURL + "/v1/text-to-speech/" + cfg.VoiceID + "/stream"
-	body, err := p.doRequest(ctx, endpoint, params.Text, cfg)
+	body, err := p.doRequest(ctx, endpoint, params.Text, &cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +115,7 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.SpeechParams) (*sdk.
 }
 
 // doRequest sends a POST TTS request and returns the response body.
-func (p *Provider) doRequest(ctx context.Context, endpoint, text string, cfg audioConfig) (io.ReadCloser, error) {
+func (p *Provider) doRequest(ctx context.Context, endpoint, text string, cfg *audioConfig) (io.ReadCloser, error) {
 	// voice_settings must always include speed (default 1.0), per API contract.
 	voiceSettings := map[string]any{
 		"stability":         cfg.Stability,

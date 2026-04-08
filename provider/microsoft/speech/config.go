@@ -64,7 +64,7 @@ func parseConfig(cfg map[string]any) audioConfig {
 // languageFor returns the BCP-47 language tag to use in the SSML <speak> element.
 // If cfg.Language is set it is used directly; otherwise the first two dash-separated
 // segments of the voice name are used (e.g. "en-US" from "en-US-JennyNeural").
-func languageFor(cfg audioConfig) string {
+func languageFor(cfg *audioConfig) string {
 	if cfg.Language != "" {
 		return cfg.Language
 	}
@@ -76,7 +76,7 @@ func languageFor(cfg audioConfig) string {
 }
 
 // buildSSML builds the SSML payload sent to Azure TTS.
-func buildSSML(text string, cfg audioConfig) string {
+func buildSSML(text string, cfg *audioConfig) string {
 	lang := languageFor(cfg)
 
 	// Build the inner prosody/voice content.

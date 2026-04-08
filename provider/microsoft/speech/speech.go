@@ -74,7 +74,7 @@ func (p *Provider) SpeechModel(id string) *sdk.SpeechModel {
 func (p *Provider) DoSynthesize(ctx context.Context, params sdk.SpeechParams) (*sdk.SpeechResult, error) {
 	cfg := parseConfig(params.Config)
 
-	body, err := p.doRequest(ctx, params.Text, cfg)
+	body, err := p.doRequest(ctx, params.Text, &cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -95,7 +95,7 @@ func (p *Provider) DoSynthesize(ctx context.Context, params sdk.SpeechParams) (*
 func (p *Provider) DoStream(ctx context.Context, params sdk.SpeechParams) (*sdk.SpeechStreamResult, error) {
 	cfg := parseConfig(params.Config)
 
-	body, err := p.doRequest(ctx, params.Text, cfg)
+	body, err := p.doRequest(ctx, params.Text, &cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +106,7 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.SpeechParams) (*sdk.
 
 // endpointURL returns the TTS REST endpoint.
 // Priority: explicit WithBaseURL override → region from Config.
-func (p *Provider) endpointURL(cfg audioConfig) (string, error) {
+func (p *Provider) endpointURL(cfg *audioConfig) (string, error) {
 	if p.baseURL != "" {
 		return p.baseURL + ttsPath, nil
 	}
@@ -117,7 +117,7 @@ func (p *Provider) endpointURL(cfg audioConfig) (string, error) {
 }
 
 // doRequest builds and sends the SSML POST request.
-func (p *Provider) doRequest(ctx context.Context, text string, cfg audioConfig) (io.ReadCloser, error) {
+func (p *Provider) doRequest(ctx context.Context, text string, cfg *audioConfig) (io.ReadCloser, error) {
 	endpoint, err := p.endpointURL(cfg)
 	if err != nil {
 		return nil, err

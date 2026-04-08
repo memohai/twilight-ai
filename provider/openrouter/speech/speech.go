@@ -247,9 +247,9 @@ func buildWAV(pcm []byte, sampleRate int) []byte {
 		numChannels  = 1
 		bitsPerSample = 16
 	)
-	byteRate := uint32(sampleRate * numChannels * bitsPerSample / 8)
+	byteRate := uint32(sampleRate * numChannels * bitsPerSample / 8) //nolint:gosec // sampleRate is a small provider constant
 	blockAlign := uint16(numChannels * bitsPerSample / 8)
-	dataSize := uint32(len(pcm))
+	dataSize := uint32(len(pcm)) //nolint:gosec // audio payload is bounded in practice
 	chunkSize := 36 + dataSize
 
 	buf := new(bytes.Buffer)
@@ -261,7 +261,7 @@ func buildWAV(pcm []byte, sampleRate int) []byte {
 	_ = binary.Write(buf, binary.LittleEndian, uint32(16))          // sub-chunk size
 	_ = binary.Write(buf, binary.LittleEndian, uint16(1))           // PCM format
 	_ = binary.Write(buf, binary.LittleEndian, uint16(numChannels))
-	_ = binary.Write(buf, binary.LittleEndian, uint32(sampleRate))
+	_ = binary.Write(buf, binary.LittleEndian, uint32(sampleRate)) //nolint:gosec // sampleRate is a small provider constant
 	_ = binary.Write(buf, binary.LittleEndian, byteRate)
 	_ = binary.Write(buf, binary.LittleEndian, blockAlign)
 	_ = binary.Write(buf, binary.LittleEndian, uint16(bitsPerSample))

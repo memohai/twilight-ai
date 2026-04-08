@@ -57,14 +57,14 @@ func (tc *tokenCache) set(token string, expiresAt int64) {
 
 // getToken calls the SAMI GetToken OpenAPI to obtain a bearer token.
 // The request is authenticated with Volcengine V4 HMAC-SHA256 signing.
-func getToken(ctx context.Context, accessKey, secretKey, appKey string, httpClient *http.Client) (string, int64, error) {
-	bodyBytes, err := json.Marshal(map[string]any{
+func getToken(ctx context.Context, accessKey, secretKey, appKey string, httpClient *http.Client) (token string, expiresAt int64, err error) {
+	bodyBytes, marshalErr := json.Marshal(map[string]any{ //nolint:gosec // appkey is a variable, not a hardcoded credential
 		"appkey":        appKey,
 		"token_version": "volc-auth-v1",
 		"expiration":    3600,
 	})
-	if err != nil {
-		return "", 0, fmt.Errorf("volcengine speech: marshal token request: %w", err)
+	if marshalErr != nil {
+		return "", 0, fmt.Errorf("volcengine speech: marshal token request: %w", marshalErr)
 	}
 
 	q := url.Values{}

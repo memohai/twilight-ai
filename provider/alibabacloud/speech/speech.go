@@ -60,7 +60,7 @@ func (p *Provider) SpeechModel(id string) *sdk.SpeechModel {
 func (p *Provider) DoSynthesize(ctx context.Context, params sdk.SpeechParams) (*sdk.SpeechResult, error) {
 	cfg := parseConfig(params.Config)
 
-	audio, err := p.client.synthesize(ctx, params.Text, cfg)
+	audio, err := p.client.synthesize(ctx, params.Text, &cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +74,7 @@ func (p *Provider) DoSynthesize(ctx context.Context, params sdk.SpeechParams) (*
 func (p *Provider) DoStream(ctx context.Context, params sdk.SpeechParams) (*sdk.SpeechStreamResult, error) {
 	cfg := parseConfig(params.Config)
 
-	ch, errCh := p.client.stream(ctx, params.Text, cfg)
+	ch, errCh := p.client.stream(ctx, params.Text, &cfg)
 	return sdk.NewSpeechStreamResult(ch, contentTypeForFormat(cfg.Format), errCh), nil
 }
 
