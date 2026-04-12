@@ -358,6 +358,86 @@ The Codex API uses a flat input format (similar to Responses). The provider conv
 | ListModels (static catalog) | ✅ |
 | Test / TestModel | ✅ |
 
+## GitHub Copilot Provider
+
+The `provider/github/copilot` package implements GitHub Copilot's documented chat completions endpoint for Copilot agents/extensions at `https://api.githubcopilot.com/chat/completions`.
+
+### When to Use Copilot vs Completions
+
+| | GitHub Copilot | OpenAI Completions |
+|--|---|---|
+| **Endpoint** | `api.githubcopilot.com/chat/completions` | `/chat/completions` |
+| **Authentication** | GitHub token issued to your Copilot agent/extension user context | API key |
+| **Model discovery** | Static local catalog (`copilot-auto`) | `GET /models` |
+| **Target use-case** | Copilot agents / extensions running inside GitHub's ecosystem | General OpenAI-compatible backends |
+
+Use **GitHub Copilot** when your code is running as a Copilot agent/extension and GitHub has already provided the user-scoped token you must pass through to the Copilot LLM endpoint. Use **OpenAI Completions** for direct OpenAI or OpenAI-compatible integrations.
+
+This is not a generic PAT-based GitHub Models integration.
+
+### Basic Usage
+
+```go
+import "github.com/memohai/twilight-ai/provider/github/copilot"
+
+provider := copilot.New(
+    // Pass through the inbound X-GitHub-Token value from GitHub.
+    copilot.WithGitHubToken(r.Header.Get("X-GitHub-Token")),
+)
+model := provider.ChatModel(copilot.AutoModel)
+```
+
+### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `WithGitHubToken(token)` | `""` | User-scoped GitHub token sent as `Authorization: Bearer <token>` |
+| `WithAPIKey(token)` | `""` | Alias for `WithGitHubToken` for migration convenience |
+| `WithBaseURL(url)` | `https://api.githubcopilot.com` | Base URL for API requests |
+| `WithHTTPClient(client)` | `&http.Client{}` | Custom HTTP client |
+
+### Model Catalog
+
+GitHub's documented Copilot LLM endpoint for agents/extensions does not expose a public `/models` discovery API. The provider therefore exposes a single static catalog entry that means "let GitHub choose":
+
+| Model | Meaning |
+|-------|---------|
+| `copilot-auto` (`copilot.AutoModel`) | Let GitHub choose the backing Copilot model |
+
+If GitHub documents or injects an explicit upstream model ID in your runtime, you can still pass that value to `provider.ChatModel("...")` and `TestModel("...")`. `AutoModel` is the safe default.
+
+### Request Mapping
+
+The provider reuses the same OpenAI-compatible chat-completions mapping as Twilight AI's OpenAI provider:
+
+| SDK Message | Copilot API |
+|-------------|-------------|
+| System message / `System` param | `{"role":"system","content":"..."}` |
+| User message | OpenAI-compatible `messages` entry |
+| Assistant reasoning | `reasoning_content` field |
+| Tool call | `tool_calls` |
+| Tool result | `{"role":"tool","tool_call_id":...}` |
+
+### Supported Features
+
+| Feature | Supported |
+|---------|-----------|
+| Text generation | ✅ |
+| Streaming (SSE) | ✅ |
+| Tool/function calling | ✅ |
+| Vision (image inputs) | ✅ |
+| Reasoning content passthrough | ✅ |
+| JSON mode / JSON Schema | ✅ |
+| Token usage reporting | ✅ |
+| ListModels (static catalog) | ✅ |
+| Test / TestModel | ✅ |
+
+### Limitations
+
+- This provider is for GitHub Copilot agent / extension runtimes, not for GitHub Models.
+- The provider intentionally exposes one sentinel local model because GitHub does not document a public model discovery API for this endpoint.
+- `Test` / `TestModel` are implemented via a minimal probe request because there is no documented public model metadata API.
+
 ---
 
 ## Anthropic Provider

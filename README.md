@@ -8,7 +8,7 @@ A lightweight, idiomatic AI SDK for Go — inspired by [Vercel AI SDK](https://s
 ## Features
 
 - **Simple API** — `GenerateText`, `StreamText`, `Embed`, `EmbedMany`, `GenerateImage`, `EditImage`, `GenerateSpeech`, and `StreamSpeech` cover most use cases
-- **Provider-agnostic** — swap between OpenAI, Anthropic, Google, Edge TTS, or any OpenAI-compatible endpoint
+- **Provider-agnostic** — swap between OpenAI, Anthropic, Google, GitHub Copilot, Edge TTS, or any OpenAI-compatible endpoint
 - **Model discovery** — `ListModels` fetches available models, `Test` checks provider connectivity and model support
 - **Tool calling** — define tools with Go structs, SDK infers JSON Schema and handles multi-step execution
 - **MCP support** — connect to MCP servers and expose remote MCP tools as Twilight AI `sdk.Tool` values
@@ -132,6 +132,27 @@ text, err := sdk.GenerateText(context.Background(),
     }),
 )
 ```
+
+### GitHub Copilot Agent
+
+```go
+import "github.com/memohai/twilight-ai/provider/github/copilot"
+
+provider := copilot.New(
+    // Use the inbound X-GitHub-Token value from your Copilot agent request.
+    copilot.WithGitHubToken("ghu_..."),
+)
+model := provider.ChatModel(copilot.AutoModel)
+
+text, err := sdk.GenerateText(context.Background(),
+    sdk.WithModel(model),
+    sdk.WithMessages([]sdk.Message{
+        sdk.UserMessage("Explain Go channels in 3 sentences."),
+    }),
+)
+```
+
+This provider targets GitHub Copilot agent / extension runtimes that can call `api.githubcopilot.com/chat/completions`. GitHub currently does not expose a public Copilot models discovery endpoint, so `copilot.AutoModel` tells the provider to let GitHub choose the backing model instead of inventing an undocumented model ID.
 
 ### Stream Text
 
