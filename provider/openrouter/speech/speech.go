@@ -19,6 +19,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -29,7 +30,7 @@ import (
 )
 
 const (
-	defaultModelID   = "openrouter-tts"
+	defaultModelID   = "openai/gpt-audio-mini"
 	defaultBaseURL   = "https://openrouter.ai/api/v1"
 	defaultModel     = "openai/gpt-audio-mini"
 	defaultVoice     = "coral"
@@ -80,14 +81,94 @@ func New(opts ...Option) *Provider {
 // SpeechModel creates a SpeechModel bound to this provider.
 func (p *Provider) SpeechModel(id string) *sdk.SpeechModel {
 	if id == "" {
-		id = defaultModelID
+		id = defaultModel
 	}
 	return &sdk.SpeechModel{ID: id, Provider: p}
+}
+
+// ListModels returns the speech models exposed by this provider.
+func (p *Provider) ListModels(ctx context.Context) ([]*sdk.SpeechModel, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+"/models", http.NoBody)
+	if err != nil {
+		return nil, fmt.Errorf("openrouter speech: build list models request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+p.apiKey)
+
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("openrouter speech: list models request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("openrouter speech: unexpected status %d: %s", resp.StatusCode, string(body))
+	}
+
+	modelIDs, err := decodeOpenRouterModelIDs(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("openrouter speech: decode list models response: %w", err)
+	}
+
+	models := make([]*sdk.SpeechModel, 0, len(modelIDs))
+	for _, id := range modelIDs {
+		m := struct{ ID string }{ID: id}
+		if isOpenRouterSpeechModel(m.ID) {
+			models = append(models, p.SpeechModel(m.ID))
+		}
+	}
+	if len(models) == 0 {
+		return nil, errors.New("openrouter speech: no speech models returned by provider")
+	}
+	return models, nil
+}
+
+func isOpenRouterSpeechModel(id string) bool {
+	id = strings.ToLower(id)
+	return strings.Contains(id, "audio") || strings.Contains(id, "tts")
+}
+
+func decodeOpenRouterModelIDs(r io.Reader) ([]string, error) {
+	body, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+
+	var wrapped struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &wrapped); err == nil && len(wrapped.Data) > 0 {
+		out := make([]string, 0, len(wrapped.Data))
+		for _, m := range wrapped.Data {
+			if m.ID != "" {
+				out = append(out, m.ID)
+			}
+		}
+		return out, nil
+	}
+
+	var direct []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(body, &direct); err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(direct))
+	for _, m := range direct {
+		if m.ID != "" {
+			out = append(out, m.ID)
+		}
+	}
+	return out, nil
 }
 
 // DoSynthesize synthesizes speech and returns the complete WAV audio.
 func (p *Provider) DoSynthesize(ctx context.Context, params sdk.SpeechParams) (*sdk.SpeechResult, error) {
 	cfg := parseConfig(params.Config)
+	if params.Model != nil && params.Model.ID != "" {
+		cfg.Model = params.Model.ID
+	}
 
 	wav, err := p.synthesize(ctx, params.Text, cfg)
 	if err != nil {
@@ -105,6 +186,9 @@ func (p *Provider) DoSynthesize(ctx context.Context, params sdk.SpeechParams) (*
 // one chunk.
 func (p *Provider) DoStream(ctx context.Context, params sdk.SpeechParams) (*sdk.SpeechStreamResult, error) {
 	cfg := parseConfig(params.Config)
+	if params.Model != nil && params.Model.ID != "" {
+		cfg.Model = params.Model.ID
+	}
 
 	wav, err := p.synthesize(ctx, params.Text, cfg)
 	if err != nil {
@@ -250,11 +334,11 @@ func buildWAV(pcm []byte, sampleRate uint32) []byte {
 	)
 	byteRate := sampleRate * numChannels * bitsPerSample / 8
 	blockAlign := uint16(numChannels * bitsPerSample / 8)
-	n := len(pcm)
-	if n < 0 || n > math.MaxUint32 {
-		n = math.MaxUint32
+	dataSize64 := uint64(len(pcm))
+	dataSize := uint32(math.MaxUint32)
+	if dataSize64 <= math.MaxUint32 {
+		dataSize = uint32(dataSize64)
 	}
-	dataSize := uint32(n)
 	chunkSize := 36 + dataSize
 
 	buf := new(bytes.Buffer)

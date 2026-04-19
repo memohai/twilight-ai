@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -66,15 +67,78 @@ func New(opts ...Option) *Provider {
 // SpeechModel creates a SpeechModel bound to this provider.
 func (p *Provider) SpeechModel(id string) *sdk.SpeechModel {
 	if id == "" {
-		id = defaultModelID
+		id = defaultModelLLM
 	}
 	return &sdk.SpeechModel{ID: id, Provider: p}
+}
+
+// ListModels returns the speech models exposed by this provider.
+func (p *Provider) ListModels(ctx context.Context) ([]*sdk.SpeechModel, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+"/v1/models", http.NoBody)
+	if err != nil {
+		return nil, fmt.Errorf("elevenlabs speech: build list models request: %w", err)
+	}
+	req.Header.Set("xi-api-key", p.apiKey)
+
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("elevenlabs speech: list models request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("elevenlabs speech: unexpected status %d: %s", resp.StatusCode, string(body))
+	}
+
+	rawModels, err := decodeModelsResponse(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("elevenlabs speech: decode response: %w", err)
+	}
+
+	models := make([]*sdk.SpeechModel, 0, len(rawModels))
+	for _, m := range rawModels {
+		if m.CanDoTTS && m.ModelID != "" {
+			models = append(models, p.SpeechModel(m.ModelID))
+		}
+	}
+	if len(models) == 0 {
+		return nil, errors.New("elevenlabs speech: no speech models returned by provider")
+	}
+	return models, nil
+}
+
+type elevenlabsModel struct {
+	ModelID  string `json:"model_id"`
+	CanDoTTS bool   `json:"can_do_text_to_speech"`
+}
+
+func decodeModelsResponse(r io.Reader) ([]elevenlabsModel, error) {
+	body, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+
+	var wrapped struct {
+		Models []elevenlabsModel `json:"models"`
+	}
+	if err := json.Unmarshal(body, &wrapped); err == nil && len(wrapped.Models) > 0 {
+		return wrapped.Models, nil
+	}
+
+	var direct []elevenlabsModel
+	if err := json.Unmarshal(body, &direct); err != nil {
+		return nil, err
+	}
+	return direct, nil
 }
 
 // DoSynthesize synthesizes speech and returns the complete audio bytes.
 // Uses the non-streaming /v1/text-to-speech/{voice_id} endpoint.
 func (p *Provider) DoSynthesize(ctx context.Context, params sdk.SpeechParams) (*sdk.SpeechResult, error) {
 	cfg := parseConfig(params.Config)
+	if params.Model != nil && params.Model.ID != "" {
+		cfg.ModelID = params.Model.ID
+	}
 	if cfg.VoiceID == "" {
 		return nil, fmt.Errorf("elevenlabs speech: voice_id is required")
 	}
@@ -100,6 +164,9 @@ func (p *Provider) DoSynthesize(ctx context.Context, params sdk.SpeechParams) (*
 // Uses the /v1/text-to-speech/{voice_id}/stream endpoint which returns chunked audio.
 func (p *Provider) DoStream(ctx context.Context, params sdk.SpeechParams) (*sdk.SpeechStreamResult, error) {
 	cfg := parseConfig(params.Config)
+	if params.Model != nil && params.Model.ID != "" {
+		cfg.ModelID = params.Model.ID
+	}
 	if cfg.VoiceID == "" {
 		return nil, fmt.Errorf("elevenlabs speech: voice_id is required")
 	}

@@ -96,6 +96,8 @@ model := provider.ChatModel("gpt-4o-mini")
 | Option | Default | Description |
 |--------|---------|-------------|
 | `WithAPIKey(key)` | `""` | API key sent as `Authorization: Bearer <key>` |
+| `WithBedrockRegion(region)` | disabled | Use AWS SigV4 with the default AWS credential chain for Bedrock's OpenAI-compatible endpoint |
+| `WithBedrockCredentials(region, accessKeyID, secretAccessKey, sessionToken)` | disabled | Use AWS SigV4 with static AWS credentials for Bedrock |
 | `WithBaseURL(url)` | `https://api.openai.com/v1` | Base URL for API requests |
 | `WithHTTPClient(client)` | `&http.Client{}` | Custom HTTP client (for proxies, timeouts, etc.) |
 
@@ -128,6 +130,12 @@ provider := completions.New(
 provider := completions.New(
     completions.WithAPIKey("your-azure-key"),
     completions.WithBaseURL("https://your-resource.openai.azure.com/openai/deployments/gpt-4o"),
+)
+
+// Amazon Bedrock OpenAI-compatible endpoint (AWS credentials)
+provider := completions.New(
+    completions.WithBedrockRegion("us-east-1"),
+    completions.WithBaseURL("https://bedrock-mantle.us-east-1.api.aws/v1"),
 )
 
 // Local (Ollama, vLLM, etc.)
@@ -198,6 +206,8 @@ model := provider.ChatModel("gpt-4o-mini")
 | Option | Default | Description |
 |--------|---------|-------------|
 | `WithAPIKey(key)` | `""` | API key sent as `Authorization: Bearer <key>` |
+| `WithBedrockRegion(region)` | disabled | Use AWS SigV4 with the default AWS credential chain for Bedrock's OpenAI-compatible endpoint |
+| `WithBedrockCredentials(region, accessKeyID, secretAccessKey, sessionToken)` | disabled | Use AWS SigV4 with static AWS credentials for Bedrock |
 | `WithBaseURL(url)` | `https://api.openai.com/v1` | Base URL for API requests |
 | `WithHTTPClient(client)` | `&http.Client{}` | Custom HTTP client |
 
@@ -218,6 +228,8 @@ provider := responses.New(
     responses.WithAPIKey("sk-or-v1-..."),
     responses.WithBaseURL("https://openrouter.ai/api/v1"),
 )
+
+Amazon Bedrock's OpenAI-compatible Responses endpoint also works with the same provider when you configure a Bedrock Mantle base URL and either `WithBedrockRegion(...)` or `WithBedrockCredentials(...)`.
 model := provider.ChatModel("openai/o4-mini")
 ```
 
@@ -777,6 +789,8 @@ vec, err := sdk.Embed(ctx, "Hello world",
 | Option | Default | Description |
 |--------|---------|-------------|
 | `WithAPIKey(key)` | `""` | API key sent as `Authorization: Bearer <key>` |
+| `WithBedrockRegion(region)` | disabled | Use AWS SigV4 with the default AWS credential chain for Bedrock's OpenAI-compatible endpoint |
+| `WithBedrockCredentials(region, accessKeyID, secretAccessKey, sessionToken)` | disabled | Use AWS SigV4 with static AWS credentials for Bedrock |
 | `WithBaseURL(url)` | `https://api.openai.com/v1` | Base URL for API requests |
 | `WithHTTPClient(client)` | `&http.Client{}` | Custom HTTP client |
 

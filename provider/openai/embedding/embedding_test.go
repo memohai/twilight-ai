@@ -87,6 +87,47 @@ func TestDoEmbed(t *testing.T) {
 	}
 }
 
+func TestDoEmbed_WithBedrockCredentials(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got == "" || got[:16] != "AWS4-HMAC-SHA256" {
+			t.Fatalf("expected SigV4 auth header, got %q", got)
+		}
+		if got := r.Header.Get("X-Amz-Date"); got == "" {
+			t.Fatal("expected X-Amz-Date header")
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"object": "list",
+			"data": []map[string]any{
+				{"object": "embedding", "index": 0, "embedding": []float64{0.1, 0.2}},
+			},
+			"model": "amazon.titan-embed-text-v2:0",
+			"usage": map[string]any{
+				"prompt_tokens": 4,
+				"total_tokens":  4,
+			},
+		})
+	}))
+	defer srv.Close()
+
+	p := embedding.New(
+		embedding.WithBaseURL(srv.URL),
+		embedding.WithBedrockCredentials("us-east-1", "AKIDEXAMPLE", "secret", ""),
+	)
+
+	result, err := p.DoEmbed(context.Background(), sdk.EmbedParams{
+		Model:  p.EmbeddingModel("amazon.titan-embed-text-v2:0"),
+		Values: []string{"hello"},
+	})
+	if err != nil {
+		t.Fatalf("DoEmbed failed: %v", err)
+	}
+	if len(result.Embeddings) != 1 {
+		t.Fatalf("expected 1 embedding, got %d", len(result.Embeddings))
+	}
+}
+
 func TestDoEmbed_WithDimensions(t *testing.T) {
 	var capturedBody map[string]any
 
@@ -219,7 +260,7 @@ func TestClientEmbedMany(t *testing.T) {
 		t.Fatalf("EmbedMany failed: %v", err)
 	}
 	if len(result.Embeddings) != 2 {
-		t.Errorf("expected 2 embeddings, got %d", len(result.Embeddings))
+		t.Fatalf("expected 2 embeddings, got %d", len(result.Embeddings))
 	}
 	if result.Usage.Tokens != 8 {
 		t.Errorf("expected 8 tokens, got %d", result.Usage.Tokens)

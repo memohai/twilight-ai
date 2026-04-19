@@ -169,13 +169,57 @@ func TestProvider_DoSynthesize_NoAudio(t *testing.T) {
 func TestProvider_SpeechModel(t *testing.T) {
 	t.Parallel()
 	p := New()
-	m := p.SpeechModel("openrouter-tts")
-	if m.ID != "openrouter-tts" {
+	m := p.SpeechModel("openai/gpt-4o-audio-preview")
+	if m.ID != "openai/gpt-4o-audio-preview" {
 		t.Errorf("ID = %q", m.ID)
 	}
 	m2 := p.SpeechModel("")
 	if m2.ID != defaultModelID {
 		t.Errorf("default ID = %q, want %q", m2.ID, defaultModelID)
+	}
+}
+
+func TestProvider_ListModels(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("method = %s, want GET", r.Method)
+		}
+		if r.URL.Path != "/models" {
+			t.Errorf("path = %s, want /models", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"openai/gpt-audio-mini"},{"id":"openai/gpt-4o-audio-preview"},{"id":"openai/gpt-4.1-mini"}]}`))
+	}))
+	defer srv.Close()
+
+	p := New(WithAPIKey("key"), WithBaseURL(srv.URL))
+	models, err := p.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("ListModels: %v", err)
+	}
+	if len(models) != 2 {
+		t.Fatalf("len(models) = %d, want 2", len(models))
+	}
+	if models[0].ID != "openai/gpt-audio-mini" || models[1].ID != "openai/gpt-4o-audio-preview" {
+		t.Fatalf("unexpected models: %q, %q", models[0].ID, models[1].ID)
+	}
+}
+
+func TestProvider_ListModels_ArrayResponse(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[{"id":"openai/gpt-audio-mini"},{"id":"openai/gpt-4o-audio-preview"},{"id":"openai/gpt-4.1-mini"}]`))
+	}))
+	defer srv.Close()
+
+	p := New(WithAPIKey("key"), WithBaseURL(srv.URL))
+	models, err := p.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("ListModels: %v", err)
+	}
+	if len(models) != 2 {
+		t.Fatalf("len(models) = %d, want 2", len(models))
 	}
 }
 

@@ -15,9 +15,10 @@ import (
 const defaultBaseURL = "https://api.openai.com/v1"
 
 type Provider struct {
-	apiKey     string
-	baseURL    string
-	httpClient *http.Client
+	apiKey         string
+	baseURL        string
+	httpClient     *http.Client
+	prepareRequest func(*http.Request) error
 }
 
 type Option func(*Provider)
@@ -25,6 +26,22 @@ type Option func(*Provider)
 func WithAPIKey(apiKey string) Option {
 	return func(p *Provider) {
 		p.apiKey = apiKey
+	}
+}
+
+// WithBedrockRegion enables AWS SigV4 authentication for Amazon Bedrock's
+// OpenAI-compatible endpoint using the default AWS credential chain.
+func WithBedrockRegion(region string) Option {
+	return func(p *Provider) {
+		p.prepareRequest = utils.NewBedrockDefaultCredentialsPreparer(region)
+	}
+}
+
+// WithBedrockCredentials enables AWS SigV4 authentication for Amazon Bedrock's
+// OpenAI-compatible endpoint using static credentials.
+func WithBedrockCredentials(region, accessKeyID, secretAccessKey, sessionToken string) Option {
+	return func(p *Provider) {
+		p.prepareRequest = utils.NewBedrockStaticCredentialsPreparer(region, accessKeyID, secretAccessKey, sessionToken)
 	}
 }
 
@@ -60,7 +77,8 @@ func (p *Provider) ListModels(ctx context.Context) ([]sdk.Model, error) {
 		Method:  http.MethodGet,
 		BaseURL: p.baseURL,
 		Path:    "/models",
-		Headers: utils.AuthHeader(p.apiKey),
+		Headers: p.authHeaders(),
+		Prepare: p.prepareRequest,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("openai: list models request failed: %w", err)
@@ -83,7 +101,8 @@ func (p *Provider) Test(ctx context.Context) *sdk.ProviderTestResult {
 		BaseURL: p.baseURL,
 		Path:    "/models",
 		Query:   map[string]string{"limit": "1"},
-		Headers: utils.AuthHeader(p.apiKey),
+		Headers: p.authHeaders(),
+		Prepare: p.prepareRequest,
 	})
 	if err != nil {
 		return classifyError(err)
@@ -96,7 +115,8 @@ func (p *Provider) TestModel(ctx context.Context, modelID string) (*sdk.ModelTes
 		Method:  http.MethodGet,
 		BaseURL: p.baseURL,
 		Path:    "/models/" + modelID,
-		Headers: utils.AuthHeader(p.apiKey),
+		Headers: p.authHeaders(),
+		Prepare: p.prepareRequest,
 	})
 	if err == nil {
 		return &sdk.ModelTestResult{Supported: true, Message: "supported"}, nil
@@ -112,7 +132,8 @@ func (p *Provider) TestModel(ctx context.Context, modelID string) (*sdk.ModelTes
 		Method:  http.MethodPost,
 		BaseURL: p.baseURL,
 		Path:    "/chat/completions",
-		Headers: utils.AuthHeader(p.apiKey),
+		Headers: p.authHeaders(),
+		Prepare: p.prepareRequest,
 		Body: map[string]any{
 			"model":      modelID,
 			"messages":   []map[string]string{{"role": "user", "content": "hi"}},
@@ -147,7 +168,8 @@ func (p *Provider) DoGenerate(ctx context.Context, params sdk.GenerateParams) (*
 		Method:  http.MethodPost,
 		BaseURL: p.baseURL,
 		Path:    "/chat/completions",
-		Headers: utils.AuthHeader(p.apiKey),
+		Headers: p.authHeaders(),
+		Prepare: p.prepareRequest,
 		Body:    req,
 	})
 	if err != nil {
@@ -407,7 +429,8 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 			Method:  http.MethodPost,
 			BaseURL: p.baseURL,
 			Path:    "/chat/completions",
-			Headers: utils.AuthHeader(p.apiKey),
+			Headers: p.authHeaders(),
+			Prepare: p.prepareRequest,
 			Body:    req,
 		}, func(ev *utils.SSEEvent) error {
 			if ev.Data == "[DONE]" {
@@ -442,6 +465,16 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 	}()
 
 	return &sdk.StreamResult{Stream: ch}, nil
+}
+
+func (p *Provider) authHeaders() map[string]string {
+	if p.prepareRequest != nil {
+		return nil
+	}
+	if p.apiKey == "" {
+		return nil
+	}
+	return utils.AuthHeader(p.apiKey)
 }
 
 type streamingToolCall struct {

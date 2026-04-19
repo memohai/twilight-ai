@@ -111,7 +111,7 @@ func TestEdgeWsClient_Stream(t *testing.T) {
 
 	cfg := audioConfig{Voice: "en-US-JennyNeural", Language: "en-US"}
 	ch, errCh := client.stream(t.Context(), "Hi", cfg)
-	var chunks [][]byte
+	chunks := make([][]byte, 0, 1)
 	for b := range ch {
 		chunks = append(chunks, b)
 	}

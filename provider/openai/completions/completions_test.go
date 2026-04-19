@@ -61,7 +61,7 @@ func TestDoGenerate(t *testing.T) {
 	result, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
 		Model: model,
 		Messages: []sdk.Message{{
-			Role:  sdk.MessageRoleUser,
+			Role:    sdk.MessageRoleUser,
 			Content: []sdk.MessagePart{sdk.TextPart{Text: "Hi"}},
 		}},
 	})
@@ -80,6 +80,55 @@ func TestDoGenerate(t *testing.T) {
 	}
 	if result.Usage.OutputTokens != 2 {
 		t.Errorf("expected 2 output tokens, got %d", result.Usage.OutputTokens)
+	}
+}
+
+func TestDoGenerate_WithBedrockCredentials(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got == "" || got[:16] != "AWS4-HMAC-SHA256" {
+			t.Fatalf("expected SigV4 auth header, got %q", got)
+		}
+		if got := r.Header.Get("X-Amz-Date"); got == "" {
+			t.Fatal("expected X-Amz-Date header")
+		}
+		if got := r.Header.Get("X-Amz-Security-Token"); got != "test-session" {
+			t.Fatalf("expected session token header, got %q", got)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id":      "chatcmpl-test",
+			"object":  "chat.completion",
+			"created": 1700000000,
+			"model":   "openai.gpt-oss-120b",
+			"choices": []map[string]any{{
+				"index":         0,
+				"finish_reason": "stop",
+				"message":       map[string]any{"role": "assistant", "content": "Hello from Bedrock"},
+			}},
+			"usage": map[string]any{
+				"prompt_tokens":     5,
+				"completion_tokens": 2,
+				"total_tokens":      7,
+			},
+		})
+	}))
+	defer srv.Close()
+
+	p := completions.New(
+		completions.WithBaseURL(srv.URL),
+		completions.WithBedrockCredentials("us-east-1", "AKIDEXAMPLE", "secret", "test-session"),
+	)
+
+	result, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model:    p.ChatModel("openai.gpt-oss-120b"),
+		Messages: []sdk.Message{sdk.UserMessage("Hi")},
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate failed: %v", err)
+	}
+	if result.Text != "Hello from Bedrock" {
+		t.Fatalf("expected Bedrock response, got %q", result.Text)
 	}
 }
 
@@ -115,7 +164,7 @@ func TestDoStream(t *testing.T) {
 	sr, err := p.DoStream(context.Background(), sdk.GenerateParams{
 		Model: model,
 		Messages: []sdk.Message{{
-			Role:  sdk.MessageRoleUser,
+			Role:    sdk.MessageRoleUser,
 			Content: []sdk.MessagePart{sdk.TextPart{Text: "Hi"}},
 		}},
 	})
@@ -460,12 +509,12 @@ func TestDoStream_ToolCall(t *testing.T) {
 	}
 
 	var (
-		gotInputStart  bool
-		gotInputEnd    bool
-		argsDelta      string
-		gotToolCall    *sdk.StreamToolCallPart
-		gotFinishStep  bool
-		gotFinish      bool
+		gotInputStart bool
+		gotInputEnd   bool
+		argsDelta     string
+		gotToolCall   *sdk.StreamToolCallPart
+		gotFinishStep bool
+		gotFinish     bool
 	)
 
 	for part := range sr.Stream {
@@ -681,7 +730,7 @@ func TestDoStream_ReasoningClosedBeforeToolCall(t *testing.T) {
 		t.Fatalf("DoStream: %v", err)
 	}
 
-	var events []sdk.StreamPartType
+	events := make([]sdk.StreamPartType, 0, 8)
 	for part := range sr.Stream {
 		events = append(events, part.Type())
 	}
@@ -841,7 +890,7 @@ func TestDoStream_EarlyToolCallDetection(t *testing.T) {
 		t.Fatalf("DoStream: %v", err)
 	}
 
-	var events []sdk.StreamPartType
+	events := make([]sdk.StreamPartType, 0, 8)
 	var toolCallCount int
 	for part := range sr.Stream {
 		events = append(events, part.Type())
@@ -900,7 +949,7 @@ func TestIntegration_DoGenerate(t *testing.T) {
 	result, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
 		Model: integrationModel(t),
 		Messages: []sdk.Message{{
-			Role:  sdk.MessageRoleUser,
+			Role:    sdk.MessageRoleUser,
 			Content: []sdk.MessagePart{sdk.TextPart{Text: "Say hello in one word."}},
 		}},
 	})
@@ -920,7 +969,7 @@ func TestIntegration_DoStream(t *testing.T) {
 	sr, err := p.DoStream(context.Background(), sdk.GenerateParams{
 		Model: integrationModel(t),
 		Messages: []sdk.Message{{
-			Role:  sdk.MessageRoleUser,
+			Role:    sdk.MessageRoleUser,
 			Content: []sdk.MessagePart{sdk.TextPart{Text: "Count from 1 to 5."}},
 		}},
 	})
@@ -952,7 +1001,7 @@ func TestIntegration_MultiModel(t *testing.T) {
 	p := newIntegrationProvider(t)
 
 	models := []struct {
-		id          string
+		id           string
 		hasReasoning bool
 	}{
 		{"google/gemini-2.5-flash", false},
@@ -964,7 +1013,7 @@ func TestIntegration_MultiModel(t *testing.T) {
 		t.Run(m.id, func(t *testing.T) {
 			model := &sdk.Model{ID: m.id}
 			result, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
-				Model: model,
+				Model:    model,
 				Messages: []sdk.Message{sdk.UserMessage("What is 2+3? Answer with just the number.")},
 			})
 			if err != nil {

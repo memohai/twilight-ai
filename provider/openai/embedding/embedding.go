@@ -12,15 +12,32 @@ import (
 const defaultBaseURL = "https://api.openai.com/v1"
 
 type Provider struct {
-	apiKey     string
-	baseURL    string
-	httpClient *http.Client
+	apiKey         string
+	baseURL        string
+	httpClient     *http.Client
+	prepareRequest func(*http.Request) error
 }
 
 type Option func(*Provider)
 
 func WithAPIKey(apiKey string) Option {
 	return func(p *Provider) { p.apiKey = apiKey }
+}
+
+// WithBedrockRegion enables AWS SigV4 authentication for Amazon Bedrock's
+// OpenAI-compatible endpoint using the default AWS credential chain.
+func WithBedrockRegion(region string) Option {
+	return func(p *Provider) {
+		p.prepareRequest = utils.NewBedrockDefaultCredentialsPreparer(region)
+	}
+}
+
+// WithBedrockCredentials enables AWS SigV4 authentication for Amazon Bedrock's
+// OpenAI-compatible endpoint using static credentials.
+func WithBedrockCredentials(region, accessKeyID, secretAccessKey, sessionToken string) Option {
+	return func(p *Provider) {
+		p.prepareRequest = utils.NewBedrockStaticCredentialsPreparer(region, accessKeyID, secretAccessKey, sessionToken)
+	}
 }
 
 func WithBaseURL(baseURL string) Option {
@@ -68,7 +85,8 @@ func (p *Provider) DoEmbed(ctx context.Context, params sdk.EmbedParams) (*sdk.Em
 		Method:  http.MethodPost,
 		BaseURL: p.baseURL,
 		Path:    "/embeddings",
-		Headers: utils.AuthHeader(p.apiKey),
+		Headers: p.authHeaders(),
+		Prepare: p.prepareRequest,
 		Body:    req,
 	})
 	if err != nil {
@@ -86,4 +104,14 @@ func (p *Provider) DoEmbed(ctx context.Context, params sdk.EmbedParams) (*sdk.Em
 			Tokens: resp.Usage.PromptTokens,
 		},
 	}, nil
+}
+
+func (p *Provider) authHeaders() map[string]string {
+	if p.prepareRequest != nil {
+		return nil
+	}
+	if p.apiKey == "" {
+		return nil
+	}
+	return utils.AuthHeader(p.apiKey)
 }

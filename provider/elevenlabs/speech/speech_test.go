@@ -125,13 +125,58 @@ func TestProvider_DoSynthesize_HTTPError(t *testing.T) {
 func TestProvider_SpeechModel(t *testing.T) {
 	t.Parallel()
 	p := New()
-	m := p.SpeechModel("elevenlabs-tts")
-	if m.ID != "elevenlabs-tts" {
+	m := p.SpeechModel("eleven_turbo_v2_5")
+	if m.ID != "eleven_turbo_v2_5" {
 		t.Errorf("ID = %q", m.ID)
 	}
 	m2 := p.SpeechModel("")
-	if m2.ID != defaultModelID {
-		t.Errorf("default ID = %q, want %q", m2.ID, defaultModelID)
+	if m2.ID != defaultModelLLM {
+		t.Errorf("default ID = %q, want %q", m2.ID, defaultModelLLM)
+	}
+}
+
+func TestProvider_ListModels(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("method = %s, want GET", r.Method)
+		}
+		if r.URL.Path != "/v1/models" {
+			t.Errorf("path = %s, want /v1/models", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"models":[{"model_id":"eleven_multilingual_v2","can_do_text_to_speech":true},{"model_id":"eleven_v3","can_do_text_to_speech":true},{"model_id":"scribe_v1","can_do_text_to_speech":false}]}`))
+	}))
+	defer srv.Close()
+
+	p := New(WithAPIKey("key"), WithBaseURL(srv.URL))
+	models, err := p.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("ListModels: %v", err)
+	}
+	if len(models) != 2 {
+		t.Fatalf("len(models) = %d, want 2", len(models))
+	}
+	if models[0].ID != "eleven_multilingual_v2" || models[1].ID != "eleven_v3" {
+		t.Fatalf("unexpected models: %q, %q", models[0].ID, models[1].ID)
+	}
+}
+
+func TestProvider_ListModels_ArrayResponse(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"model_id":"eleven_multilingual_v2","can_do_text_to_speech":true},{"model_id":"scribe_v1","can_do_text_to_speech":false}]`))
+	}))
+	defer srv.Close()
+
+	p := New(WithAPIKey("key"), WithBaseURL(srv.URL))
+	models, err := p.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("ListModels: %v", err)
+	}
+	if len(models) != 1 || models[0].ID != "eleven_multilingual_v2" {
+		t.Fatalf("unexpected models: %+v", models)
 	}
 }
 

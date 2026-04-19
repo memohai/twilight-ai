@@ -66,14 +66,22 @@ func New(opts ...Option) *Provider {
 // SpeechModel creates a SpeechModel bound to this provider.
 func (p *Provider) SpeechModel(id string) *sdk.SpeechModel {
 	if id == "" {
-		id = defaultModelID
+		id = defaultVoiceModel
 	}
 	return &sdk.SpeechModel{ID: id, Provider: p}
+}
+
+// ListModels returns the speech models exposed by this provider.
+func (p *Provider) ListModels(context.Context) ([]*sdk.SpeechModel, error) {
+	return nil, fmt.Errorf("deepgram speech: provider does not expose a remote models discovery API in this SDK")
 }
 
 // DoSynthesize synthesizes speech and returns the complete audio bytes.
 func (p *Provider) DoSynthesize(ctx context.Context, params sdk.SpeechParams) (*sdk.SpeechResult, error) {
 	cfg := parseConfig(params.Config)
+	if params.Model != nil && params.Model.ID != "" {
+		cfg.Model = params.Model.ID
+	}
 
 	body, err := p.doRequest(ctx, params.Text, cfg)
 	if err != nil {
@@ -94,6 +102,9 @@ func (p *Provider) DoSynthesize(ctx context.Context, params sdk.SpeechParams) (*
 // DoStream synthesizes speech and returns a streaming result backed by chunked HTTP body.
 func (p *Provider) DoStream(ctx context.Context, params sdk.SpeechParams) (*sdk.SpeechStreamResult, error) {
 	cfg := parseConfig(params.Config)
+	if params.Model != nil && params.Model.ID != "" {
+		cfg.Model = params.Model.ID
+	}
 
 	body, err := p.doRequest(ctx, params.Text, cfg)
 	if err != nil {

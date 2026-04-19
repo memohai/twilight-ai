@@ -17,6 +17,7 @@ type RequestOptions struct {
 	Headers map[string]string
 	Query   map[string]string
 	Body    any
+	Prepare func(*http.Request) error
 }
 
 type APIError struct {
@@ -84,6 +85,12 @@ func BuildRequest(ctx context.Context, opts *RequestOptions) (*http.Request, err
 
 	for k, v := range opts.Headers {
 		req.Header.Set(k, v)
+	}
+
+	if opts.Prepare != nil {
+		if err := opts.Prepare(req); err != nil {
+			return nil, fmt.Errorf("prepare request: %w", err)
+		}
 	}
 
 	return req, nil

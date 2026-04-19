@@ -44,6 +44,12 @@ func StreamSpeech(ctx context.Context, options ...SpeechOption) (*SpeechStreamRe
 	return defaultClient.StreamSpeech(ctx, options...)
 }
 
+// --- Transcription convenience functions ---
+
+func Transcribe(ctx context.Context, options ...TranscriptionOption) (*TranscriptionResult, error) {
+	return defaultClient.Transcribe(ctx, options...)
+}
+
 // --- Image convenience functions ---
 
 func GenerateImage(ctx context.Context, options ...ImageGenerateOption) (*ImageResult, error) {

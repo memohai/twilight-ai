@@ -7,9 +7,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/google/jsonschema-go/jsonschema"
+	"github.com/memohai/twilight-ai/internal/testutil"
 	"github.com/memohai/twilight-ai/provider/openai/responses"
 	"github.com/memohai/twilight-ai/sdk"
 )
@@ -95,6 +97,55 @@ func TestResponsesDoGenerate(t *testing.T) {
 	}
 }
 
+func TestResponsesDoGenerate_WithBedrockCredentials(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got == "" || got[:16] != "AWS4-HMAC-SHA256" {
+			t.Fatalf("expected SigV4 auth header, got %q", got)
+		}
+		if got := r.Header.Get("X-Amz-Date"); got == "" {
+			t.Fatal("expected X-Amz-Date header")
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id":         "resp_test123",
+			"created_at": 1700000000,
+			"model":      "openai.gpt-oss-120b",
+			"output": []map[string]any{{
+				"type": "message",
+				"id":   "msg_001",
+				"role": "assistant",
+				"content": []map[string]any{{
+					"type":        "output_text",
+					"text":        "Hello from Bedrock",
+					"annotations": []any{},
+				}},
+			}},
+			"usage": map[string]any{
+				"input_tokens":  5,
+				"output_tokens": 2,
+			},
+		})
+	}))
+	defer srv.Close()
+
+	p := responses.New(
+		responses.WithBaseURL(srv.URL),
+		responses.WithBedrockCredentials("us-east-1", "AKIDEXAMPLE", "secret", ""),
+	)
+
+	result, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model:    p.ChatModel("openai.gpt-oss-120b"),
+		Messages: []sdk.Message{sdk.UserMessage("Hi")},
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate: %v", err)
+	}
+	if result.Text != "Hello from Bedrock" {
+		t.Fatalf("text: got %q", result.Text)
+	}
+}
+
 func TestResponsesDoGenerate_ToolCall(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
@@ -138,7 +189,7 @@ func TestResponsesDoGenerate_ToolCall(t *testing.T) {
 	p := responses.New(responses.WithAPIKey("k"), responses.WithBaseURL(srv.URL))
 
 	result, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
-		Model: p.ChatModel("gpt-4o-mini"),
+		Model:    p.ChatModel("gpt-4o-mini"),
 		Messages: []sdk.Message{sdk.UserMessage("Weather in Beijing?")},
 		Tools: []sdk.Tool{{
 			Name:        "get_weather",
@@ -661,7 +712,7 @@ func TestResponsesDoStream_Reasoning(t *testing.T) {
 
 	var reasoning, text string
 	var gotReasoningStart, gotReasoningEnd bool
-	var events []sdk.StreamPartType
+	events := make([]sdk.StreamPartType, 0, 8)
 	for part := range sr.Stream {
 		events = append(events, part.Type())
 		switch p := part.(type) {
@@ -1098,6 +1149,77 @@ func responsesIntegrationModel(t *testing.T, p *responses.Provider) *sdk.Model {
 	return p.ChatModel(m)
 }
 
+func newBedrockBearerIntegrationProvider(t *testing.T) *responses.Provider {
+	t.Helper()
+
+	token := envOrSkip(t, "AWS_BEARER_TOKEN_BEDROCK")
+	baseURLs, source := bedrockBearerBaseURLs()
+	t.Logf("resolving Bedrock base URL from %s", source)
+
+	for _, baseURL := range baseURLs {
+		p := responses.New(
+			responses.WithAPIKey(token),
+			responses.WithBaseURL(baseURL),
+		)
+
+		models, err := p.ListModels(context.Background())
+		if err == nil {
+			t.Logf("using Bedrock base URL %q", baseURL)
+			if len(models) == 0 {
+				t.Fatalf("Bedrock base URL %q returned zero models", baseURL)
+			}
+			return p
+		}
+
+		if strings.Contains(err.Error(), "valid region") {
+			t.Logf("Bedrock base URL %q rejected token region, trying next endpoint", baseURL)
+			continue
+		}
+		if strings.Contains(err.Error(), "Signature expired") {
+			t.Skipf("skipping Bedrock integration due to expired signature: %v", err)
+		}
+
+		t.Fatalf("Bedrock ListModels via %q: %v", baseURL, err)
+	}
+
+	t.Fatal("unable to find a valid Bedrock region for AWS_BEARER_TOKEN_BEDROCK; set AWS_BEDROCK_BASE_URL or AWS_REGION explicitly")
+	return nil
+}
+
+func bedrockBearerBaseURLs() ([]string, string) {
+	if baseURL := os.Getenv("AWS_BEDROCK_BASE_URL"); baseURL != "" {
+		return []string{baseURL}, "AWS_BEDROCK_BASE_URL"
+	}
+
+	if region := os.Getenv("AWS_REGION"); region != "" {
+		return []string{fmt.Sprintf("https://bedrock-mantle.%s.api.aws/v1", region)}, "AWS_REGION"
+	}
+	if region := os.Getenv("AWS_DEFAULT_REGION"); region != "" {
+		return []string{fmt.Sprintf("https://bedrock-mantle.%s.api.aws/v1", region)}, "AWS_DEFAULT_REGION"
+	}
+
+	regions := []string{
+		"us-east-1",
+		"us-east-2",
+		"us-west-2",
+		"ap-northeast-1",
+		"ap-south-1",
+		"ap-southeast-3",
+		"eu-central-1",
+		"eu-west-1",
+		"eu-west-2",
+		"eu-south-1",
+		"eu-north-1",
+		"sa-east-1",
+	}
+
+	baseURLs := make([]string, 0, len(regions))
+	for _, region := range regions {
+		baseURLs = append(baseURLs, fmt.Sprintf("https://bedrock-mantle.%s.api.aws/v1", region))
+	}
+	return baseURLs, "built-in region fallback"
+}
+
 func TestIntegration_ResponsesDoGenerate(t *testing.T) {
 	p := newResponsesIntegrationProvider(t)
 	model := responsesIntegrationModel(t, p)
@@ -1114,6 +1236,81 @@ func TestIntegration_ResponsesDoGenerate(t *testing.T) {
 	if result.Text == "" {
 		t.Error("expected non-empty text")
 	}
+}
+
+func TestIntegration_BedrockBearer_ListModelsAndStartSession(t *testing.T) {
+	p := newBedrockBearerIntegrationProvider(t)
+
+	models, err := p.ListModels(context.Background())
+	if err != nil {
+		if strings.Contains(err.Error(), "Signature expired") {
+			t.Skipf("skipping due to expired Bedrock signature: %v", err)
+		}
+		t.Fatalf("ListModels: %v", err)
+	}
+	if len(models) == 0 {
+		t.Fatal("expected at least one Bedrock model")
+	}
+
+	t.Logf("listed %d models", len(models))
+
+	model, result, err := runBedrockResponsesProbe(t, p, models)
+	if err != nil {
+		t.Fatalf("Bedrock responses probe: %v", err)
+	}
+
+	t.Logf("response_id=%q model=%q finish=%s text=%q", result.Response.ID, model.ID, result.FinishReason, result.Text)
+
+	if result.Response.ID == "" {
+		t.Error("expected non-empty response id for Bedrock session")
+	}
+	if result.Text == "" {
+		t.Error("expected non-empty text")
+	}
+}
+
+func runBedrockResponsesProbe(t *testing.T, p *responses.Provider, models []sdk.Model) (*sdk.Model, *sdk.GenerateResult, error) {
+	t.Helper()
+
+	candidates := make([]string, 0, len(models))
+	preferred := os.Getenv("AWS_BEDROCK_MODEL")
+	if preferred != "" {
+		candidates = append(candidates, preferred)
+	}
+
+	seen := map[string]bool{}
+	for _, model := range models {
+		if !seen[model.ID] {
+			candidates = append(candidates, model.ID)
+			seen[model.ID] = true
+		}
+	}
+
+	var lastErr error
+	for _, modelID := range candidates {
+		model := p.ChatModel(modelID)
+		result, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+			Model:    model,
+			Messages: []sdk.Message{sdk.UserMessage("Reply with exactly: ok")},
+		})
+		if err == nil {
+			t.Logf("selected Bedrock responses model %q", modelID)
+			return model, result, nil
+		}
+
+		if strings.Contains(err.Error(), "does not support the '/v1/responses' API") {
+			t.Logf("skipping model %q: %v", modelID, err)
+			lastErr = err
+			continue
+		}
+
+		return nil, nil, err
+	}
+
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no Bedrock models returned from ListModels")
+	}
+	return nil, nil, lastErr
 }
 
 func TestIntegration_ResponsesDoStream(t *testing.T) {
@@ -1182,7 +1379,7 @@ func TestIntegration_ResponsesDoStream_Reasoning(t *testing.T) {
 
 	var text, reasoning string
 	var gotReasoningStart, gotReasoningEnd bool
-	var events []sdk.StreamPartType
+	events := make([]sdk.StreamPartType, 0, 8)
 	for part := range sr.Stream {
 		events = append(events, part.Type())
 		switch p := part.(type) {
@@ -1278,7 +1475,7 @@ func TestIntegration_ResponsesDoStream_ToolCall(t *testing.T) {
 	}
 
 	var toolCalls []sdk.StreamToolCallPart
-	var events []sdk.StreamPartType
+	events := make([]sdk.StreamPartType, 0, 8)
 	for part := range sr.Stream {
 		events = append(events, part.Type())
 		switch p := part.(type) {
@@ -1437,4 +1634,9 @@ func TestTestModel_NotSupported(t *testing.T) {
 	if result.Supported {
 		t.Error("expected model to not be supported")
 	}
+}
+
+func TestMain(m *testing.M) {
+	testutil.LoadEnv()
+	os.Exit(m.Run())
 }

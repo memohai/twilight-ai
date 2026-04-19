@@ -1,6 +1,11 @@
 package responses
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+	"math"
+	"strconv"
+)
 
 // --- Request types ---
 
@@ -95,7 +100,7 @@ type responsesReasoningItem struct {
 
 type responsesResponse struct {
 	ID                string                `json:"id"`
-	CreatedAt         int64                 `json:"created_at"`
+	CreatedAt         unixTimestamp         `json:"created_at"`
 	Model             string                `json:"model"`
 	Output            []responsesOutputItem `json:"output"`
 	Usage             *responsesUsage       `json:"usage,omitempty"`
@@ -117,9 +122,9 @@ type responsesOutputItem struct {
 	Type string `json:"type"`
 
 	// type: "message"
-	ID      string                    `json:"id,omitempty"`
-	Role    string                    `json:"role,omitempty"`
-	Content []responsesOutputContent  `json:"content,omitempty"`
+	ID      string                   `json:"id,omitempty"`
+	Role    string                   `json:"role,omitempty"`
+	Content []responsesOutputContent `json:"content,omitempty"`
 
 	// type: "reasoning"
 	Summary          []responsesReasoningSummaryText `json:"summary,omitempty"`
@@ -135,9 +140,9 @@ type responsesOutputItem struct {
 }
 
 type responsesOutputContent struct {
-	Type        string                   `json:"type"`
-	Text        string                   `json:"text"`
-	Annotations []responsesAnnotation    `json:"annotations,omitempty"`
+	Type        string                `json:"type"`
+	Text        string                `json:"text"`
+	Annotations []responsesAnnotation `json:"annotations,omitempty"`
 }
 
 type responsesAnnotation struct {
@@ -149,9 +154,9 @@ type responsesAnnotation struct {
 }
 
 type responsesUsage struct {
-	InputTokens        int                         `json:"input_tokens"`
-	OutputTokens       int                         `json:"output_tokens"`
-	InputTokensDetails *responsesInputTokenDetails `json:"input_tokens_details,omitempty"`
+	InputTokens         int                          `json:"input_tokens"`
+	OutputTokens        int                          `json:"output_tokens"`
+	InputTokensDetails  *responsesInputTokenDetails  `json:"input_tokens_details,omitempty"`
 	OutputTokensDetails *responsesOutputTokenDetails `json:"output_tokens_details,omitempty"`
 }
 
@@ -170,10 +175,47 @@ type responsesOutputTokenDetails struct {
 type responsesCreatedChunk struct {
 	Type     string `json:"type"`
 	Response struct {
-		ID        string `json:"id"`
-		CreatedAt int64  `json:"created_at"`
-		Model     string `json:"model"`
+		ID        string        `json:"id"`
+		CreatedAt unixTimestamp `json:"created_at"`
+		Model     string        `json:"model"`
 	} `json:"response"`
+}
+
+type unixTimestamp int64
+
+func (t *unixTimestamp) UnmarshalJSON(data []byte) error {
+	if len(data) == 0 || string(data) == "null" {
+		*t = 0
+		return nil
+	}
+
+	var i int64
+	if err := json.Unmarshal(data, &i); err == nil {
+		*t = unixTimestamp(i)
+		return nil
+	}
+
+	var f float64
+	if err := json.Unmarshal(data, &f); err == nil {
+		*t = unixTimestamp(int64(math.Round(f)))
+		return nil
+	}
+
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		if s == "" {
+			*t = 0
+			return nil
+		}
+		v, err := strconv.ParseFloat(s, 64)
+		if err != nil {
+			return fmt.Errorf("parse unix timestamp %q: %w", s, err)
+		}
+		*t = unixTimestamp(int64(math.Round(v)))
+		return nil
+	}
+
+	return fmt.Errorf("unsupported unix timestamp: %s", string(data))
 }
 
 // responsesOutputItemAddedChunk is sent for event: response.output_item.added
