@@ -74,25 +74,29 @@ func (p *Provider) SpeechModel(id string) *sdk.SpeechModel {
 
 // ListModels returns the speech models exposed by this provider.
 func (p *Provider) ListModels(ctx context.Context) ([]*sdk.SpeechModel, error) {
-	type modelsListResponse struct {
-		Models []struct {
-			ModelID  string `json:"model_id"`
-			CanDoTTS bool   `json:"can_do_text_to_speech"`
-		} `json:"models"`
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+"/v1/models", http.NoBody)
+	if err != nil {
+		return nil, fmt.Errorf("elevenlabs speech: build list models request: %w", err)
 	}
+	req.Header.Set("xi-api-key", p.apiKey)
 
-	resp, err := utils.FetchJSON[modelsListResponse](ctx, p.httpClient, &utils.RequestOptions{
-		Method:  http.MethodGet,
-		BaseURL: p.baseURL,
-		Path:    "/v1/models",
-		Headers: map[string]string{"xi-api-key": p.apiKey},
-	})
+	resp, err := p.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("elevenlabs speech: list models request failed: %w", err)
 	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("elevenlabs speech: unexpected status %d: %s", resp.StatusCode, string(body))
+	}
 
-	models := make([]*sdk.SpeechModel, 0, len(resp.Models))
-	for _, m := range resp.Models {
+	rawModels, err := decodeModelsResponse(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("elevenlabs speech: decode response: %w", err)
+	}
+
+	models := make([]*sdk.SpeechModel, 0, len(rawModels))
+	for _, m := range rawModels {
 		if m.CanDoTTS && m.ModelID != "" {
 			models = append(models, p.SpeechModel(m.ModelID))
 		}
@@ -101,6 +105,31 @@ func (p *Provider) ListModels(ctx context.Context) ([]*sdk.SpeechModel, error) {
 		return nil, errors.New("elevenlabs speech: no speech models returned by provider")
 	}
 	return models, nil
+}
+
+type elevenlabsModel struct {
+	ModelID  string `json:"model_id"`
+	CanDoTTS bool   `json:"can_do_text_to_speech"`
+}
+
+func decodeModelsResponse(r io.Reader) ([]elevenlabsModel, error) {
+	body, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+
+	var wrapped struct {
+		Models []elevenlabsModel `json:"models"`
+	}
+	if err := json.Unmarshal(body, &wrapped); err == nil && len(wrapped.Models) > 0 {
+		return wrapped.Models, nil
+	}
+
+	var direct []elevenlabsModel
+	if err := json.Unmarshal(body, &direct); err != nil {
+		return nil, err
+	}
+	return direct, nil
 }
 
 // DoSynthesize synthesizes speech and returns the complete audio bytes.

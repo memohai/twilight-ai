@@ -162,6 +162,24 @@ func TestProvider_ListModels(t *testing.T) {
 	}
 }
 
+func TestProvider_ListModels_ArrayResponse(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"model_id":"eleven_multilingual_v2","can_do_text_to_speech":true},{"model_id":"scribe_v1","can_do_text_to_speech":false}]`))
+	}))
+	defer srv.Close()
+
+	p := New(WithAPIKey("key"), WithBaseURL(srv.URL))
+	models, err := p.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("ListModels: %v", err)
+	}
+	if len(models) != 1 || models[0].ID != "eleven_multilingual_v2" {
+		t.Fatalf("unexpected models: %+v", models)
+	}
+}
+
 func TestParseConfig(t *testing.T) {
 	t.Parallel()
 	cfg := parseConfig(map[string]any{

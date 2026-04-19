@@ -206,6 +206,23 @@ func TestProvider_ListModels(t *testing.T) {
 	}
 }
 
+func TestProvider_ListModels_ArrayResponse(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[{"id":"openai/gpt-audio-mini"},{"id":"openai/gpt-4o-audio-preview"},{"id":"openai/gpt-4.1-mini"}]`))
+	}))
+	defer srv.Close()
+
+	p := New(WithAPIKey("key"), WithBaseURL(srv.URL))
+	models, err := p.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("ListModels: %v", err)
+	}
+	if len(models) != 2 {
+		t.Fatalf("len(models) = %d, want 2", len(models))
+	}
+}
+
 func TestBuildWAV(t *testing.T) {
 	t.Parallel()
 	pcm := make([]byte, 100) // 50 samples of silence

@@ -26,6 +26,23 @@ func TestProvider_ListModels(t *testing.T) {
 	}
 }
 
+func TestProvider_ListModels_ArrayResponse(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[{"model_id":"scribe_v2","can_do_speech_to_text":true},{"model_id":"eleven_v3","can_do_speech_to_text":false}]`))
+	}))
+	defer srv.Close()
+
+	p := New(WithAPIKey("key"), WithBaseURL(srv.URL))
+	models, err := p.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("ListModels: %v", err)
+	}
+	if len(models) != 1 || models[0].ID != "scribe_v2" {
+		t.Fatalf("unexpected models: %+v", models)
+	}
+}
+
 func TestProvider_DoTranscribe(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

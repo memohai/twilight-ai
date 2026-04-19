@@ -51,22 +51,29 @@ func (p *Provider) TranscriptionModel(id string) *sdk.TranscriptionModel {
 }
 
 func (p *Provider) ListModels(ctx context.Context) ([]*sdk.TranscriptionModel, error) {
-	type modelsListResponse struct {
-		Models []map[string]any `json:"models"`
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+"/v1/models", http.NoBody)
+	if err != nil {
+		return nil, fmt.Errorf("elevenlabs transcription: build list models request: %w", err)
 	}
+	req.Header.Set("xi-api-key", p.apiKey)
 
-	resp, err := utils.FetchJSON[modelsListResponse](ctx, p.httpClient, &utils.RequestOptions{
-		Method:  http.MethodGet,
-		BaseURL: p.baseURL,
-		Path:    "/v1/models",
-		Headers: map[string]string{"xi-api-key": p.apiKey},
-	})
+	resp, err := p.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("elevenlabs transcription: list models request failed: %w", err)
 	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("elevenlabs transcription: unexpected status %d: %s", resp.StatusCode, string(body))
+	}
 
-	models := make([]*sdk.TranscriptionModel, 0, len(resp.Models))
-	for _, raw := range resp.Models {
+	rawModels, err := decodeTranscriptionModelsResponse(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("elevenlabs transcription: decode response: %w", err)
+	}
+
+	models := make([]*sdk.TranscriptionModel, 0, len(rawModels))
+	for _, raw := range rawModels {
 		id, _ := raw["model_id"].(string)
 		if id == "" {
 			continue
@@ -85,6 +92,26 @@ func (p *Provider) ListModels(ctx context.Context) ([]*sdk.TranscriptionModel, e
 		return nil, errors.New("elevenlabs transcription: no transcription models returned by provider")
 	}
 	return models, nil
+}
+
+func decodeTranscriptionModelsResponse(r io.Reader) ([]map[string]any, error) {
+	body, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+
+	var wrapped struct {
+		Models []map[string]any `json:"models"`
+	}
+	if err := json.Unmarshal(body, &wrapped); err == nil && len(wrapped.Models) > 0 {
+		return wrapped.Models, nil
+	}
+
+	var direct []map[string]any
+	if err := json.Unmarshal(body, &direct); err != nil {
+		return nil, err
+	}
+	return direct, nil
 }
 
 type audioConfig struct {

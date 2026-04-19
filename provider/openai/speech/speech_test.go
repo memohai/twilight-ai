@@ -157,6 +157,24 @@ func TestProvider_ListModels(t *testing.T) {
 	}
 }
 
+func TestProvider_ListModels_ArrayResponse(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"id":"gpt-4o-mini-tts"},{"id":"tts-1"},{"id":"gpt-4.1"}]`))
+	}))
+	defer srv.Close()
+
+	p := New(WithAPIKey("key"), WithBaseURL(srv.URL))
+	models, err := p.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("ListModels: %v", err)
+	}
+	if len(models) != 2 {
+		t.Fatalf("len(models) = %d, want 2", len(models))
+	}
+}
+
 func TestParseConfig(t *testing.T) {
 	t.Parallel()
 	cfg := parseConfig(map[string]any{

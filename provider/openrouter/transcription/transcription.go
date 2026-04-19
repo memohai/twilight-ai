@@ -49,16 +49,6 @@ func (p *Provider) TranscriptionModel(id string) *sdk.TranscriptionModel {
 }
 
 func (p *Provider) ListModels(ctx context.Context) ([]*sdk.TranscriptionModel, error) {
-	var resp struct {
-		Data []struct {
-			ID           string `json:"id"`
-			Architecture struct {
-				InputModalities  []string `json:"input_modalities"`
-				OutputModalities []string `json:"output_modalities"`
-			} `json:"architecture"`
-		} `json:"data"`
-	}
-
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+"/models?output_modalities=text", http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("openrouter transcription: build list models request: %w", err)
@@ -74,12 +64,13 @@ func (p *Provider) ListModels(ctx context.Context) ([]*sdk.TranscriptionModel, e
 		body, _ := io.ReadAll(httpResp.Body)
 		return nil, fmt.Errorf("openrouter transcription: unexpected status %d: %s", httpResp.StatusCode, string(body))
 	}
-	if err := json.NewDecoder(httpResp.Body).Decode(&resp); err != nil {
+	rawModels, err := decodeOpenRouterModels(httpResp.Body)
+	if err != nil {
 		return nil, fmt.Errorf("openrouter transcription: decode list models response: %w", err)
 	}
 
-	models := make([]*sdk.TranscriptionModel, 0, len(resp.Data))
-	for _, m := range resp.Data {
+	models := make([]*sdk.TranscriptionModel, 0, len(rawModels))
+	for _, m := range rawModels {
 		if isAudioInputModel(m.ID, m.Architecture.InputModalities) {
 			models = append(models, p.TranscriptionModel(m.ID))
 		}
@@ -88,6 +79,34 @@ func (p *Provider) ListModels(ctx context.Context) ([]*sdk.TranscriptionModel, e
 		return nil, errors.New("openrouter transcription: no transcription-capable models returned by provider")
 	}
 	return models, nil
+}
+
+type openRouterModel struct {
+	ID           string `json:"id"`
+	Architecture struct {
+		InputModalities  []string `json:"input_modalities"`
+		OutputModalities []string `json:"output_modalities"`
+	} `json:"architecture"`
+}
+
+func decodeOpenRouterModels(r io.Reader) ([]openRouterModel, error) {
+	body, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+
+	var wrapped struct {
+		Data []openRouterModel `json:"data"`
+	}
+	if err := json.Unmarshal(body, &wrapped); err == nil && len(wrapped.Data) > 0 {
+		return wrapped.Data, nil
+	}
+
+	var direct []openRouterModel
+	if err := json.Unmarshal(body, &direct); err != nil {
+		return nil, err
+	}
+	return direct, nil
 }
 
 func isAudioInputModel(id string, inputs []string) bool {

@@ -51,24 +51,30 @@ func (p *Provider) TranscriptionModel(id string) *sdk.TranscriptionModel {
 }
 
 func (p *Provider) ListModels(ctx context.Context) ([]*sdk.TranscriptionModel, error) {
-	type modelsListResponse struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+"/models", http.NoBody)
+	if err != nil {
+		return nil, fmt.Errorf("openai transcription: build list models request: %w", err)
 	}
+	req.Header.Set("Authorization", utils.BearerToken(p.apiKey))
 
-	resp, err := utils.FetchJSON[modelsListResponse](ctx, p.httpClient, &utils.RequestOptions{
-		Method:  http.MethodGet,
-		BaseURL: p.baseURL,
-		Path:    "/models",
-		Headers: map[string]string{"Authorization": utils.BearerToken(p.apiKey)},
-	})
+	resp, err := p.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("openai transcription: list models request failed: %w", err)
 	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("openai transcription: unexpected status %d: %s", resp.StatusCode, string(body))
+	}
 
-	models := make([]*sdk.TranscriptionModel, 0, len(resp.Data))
-	for _, m := range resp.Data {
+	rawModels, err := decodeModelIDs(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("openai transcription: decode response: %w", err)
+	}
+
+	models := make([]*sdk.TranscriptionModel, 0, len(rawModels))
+	for _, id := range rawModels {
+		m := struct{ ID string }{ID: id}
 		if isTranscriptionModel(m.ID) {
 			models = append(models, p.TranscriptionModel(m.ID))
 		}
@@ -82,6 +88,42 @@ func (p *Provider) ListModels(ctx context.Context) ([]*sdk.TranscriptionModel, e
 func isTranscriptionModel(id string) bool {
 	id = strings.ToLower(id)
 	return id == "whisper-1" || strings.Contains(id, "transcribe")
+}
+
+func decodeModelIDs(r io.Reader) ([]string, error) {
+	body, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+
+	var wrapped struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &wrapped); err == nil && len(wrapped.Data) > 0 {
+		out := make([]string, 0, len(wrapped.Data))
+		for _, m := range wrapped.Data {
+			if m.ID != "" {
+				out = append(out, m.ID)
+			}
+		}
+		return out, nil
+	}
+
+	var direct []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(body, &direct); err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(direct))
+	for _, m := range direct {
+		if m.ID != "" {
+			out = append(out, m.ID)
+		}
+	}
+	return out, nil
 }
 
 func (p *Provider) DoTranscribe(ctx context.Context, params sdk.TranscriptionParams) (*sdk.TranscriptionResult, error) {

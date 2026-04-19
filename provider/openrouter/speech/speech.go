@@ -88,12 +88,6 @@ func (p *Provider) SpeechModel(id string) *sdk.SpeechModel {
 
 // ListModels returns the speech models exposed by this provider.
 func (p *Provider) ListModels(ctx context.Context) ([]*sdk.SpeechModel, error) {
-	type modelsListResponse struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
-	}
-
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+"/models", http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("openrouter speech: build list models request: %w", err)
@@ -110,13 +104,14 @@ func (p *Provider) ListModels(ctx context.Context) ([]*sdk.SpeechModel, error) {
 		return nil, fmt.Errorf("openrouter speech: unexpected status %d: %s", resp.StatusCode, string(body))
 	}
 
-	var payload modelsListResponse
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	modelIDs, err := decodeOpenRouterModelIDs(resp.Body)
+	if err != nil {
 		return nil, fmt.Errorf("openrouter speech: decode list models response: %w", err)
 	}
 
-	models := make([]*sdk.SpeechModel, 0, len(payload.Data))
-	for _, m := range payload.Data {
+	models := make([]*sdk.SpeechModel, 0, len(modelIDs))
+	for _, id := range modelIDs {
+		m := struct{ ID string }{ID: id}
 		if isOpenRouterSpeechModel(m.ID) {
 			models = append(models, p.SpeechModel(m.ID))
 		}
@@ -130,6 +125,42 @@ func (p *Provider) ListModels(ctx context.Context) ([]*sdk.SpeechModel, error) {
 func isOpenRouterSpeechModel(id string) bool {
 	id = strings.ToLower(id)
 	return strings.Contains(id, "audio") || strings.Contains(id, "tts")
+}
+
+func decodeOpenRouterModelIDs(r io.Reader) ([]string, error) {
+	body, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+
+	var wrapped struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &wrapped); err == nil && len(wrapped.Data) > 0 {
+		out := make([]string, 0, len(wrapped.Data))
+		for _, m := range wrapped.Data {
+			if m.ID != "" {
+				out = append(out, m.ID)
+			}
+		}
+		return out, nil
+	}
+
+	var direct []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(body, &direct); err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(direct))
+	for _, m := range direct {
+		if m.ID != "" {
+			out = append(out, m.ID)
+		}
+	}
+	return out, nil
 }
 
 // DoSynthesize synthesizes speech and returns the complete WAV audio.
