@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -66,15 +67,49 @@ func New(opts ...Option) *Provider {
 // SpeechModel creates a SpeechModel bound to this provider.
 func (p *Provider) SpeechModel(id string) *sdk.SpeechModel {
 	if id == "" {
-		id = defaultModelID
+		id = defaultModelLLM
 	}
 	return &sdk.SpeechModel{ID: id, Provider: p}
+}
+
+// ListModels returns the speech models exposed by this provider.
+func (p *Provider) ListModels(ctx context.Context) ([]*sdk.SpeechModel, error) {
+	type modelsListResponse struct {
+		Models []struct {
+			ModelID  string `json:"model_id"`
+			CanDoTTS bool   `json:"can_do_text_to_speech"`
+		} `json:"models"`
+	}
+
+	resp, err := utils.FetchJSON[modelsListResponse](ctx, p.httpClient, &utils.RequestOptions{
+		Method:  http.MethodGet,
+		BaseURL: p.baseURL,
+		Path:    "/v1/models",
+		Headers: map[string]string{"xi-api-key": p.apiKey},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("elevenlabs speech: list models request failed: %w", err)
+	}
+
+	models := make([]*sdk.SpeechModel, 0, len(resp.Models))
+	for _, m := range resp.Models {
+		if m.CanDoTTS && m.ModelID != "" {
+			models = append(models, p.SpeechModel(m.ModelID))
+		}
+	}
+	if len(models) == 0 {
+		return nil, errors.New("elevenlabs speech: no speech models returned by provider")
+	}
+	return models, nil
 }
 
 // DoSynthesize synthesizes speech and returns the complete audio bytes.
 // Uses the non-streaming /v1/text-to-speech/{voice_id} endpoint.
 func (p *Provider) DoSynthesize(ctx context.Context, params sdk.SpeechParams) (*sdk.SpeechResult, error) {
 	cfg := parseConfig(params.Config)
+	if params.Model != nil && params.Model.ID != "" {
+		cfg.ModelID = params.Model.ID
+	}
 	if cfg.VoiceID == "" {
 		return nil, fmt.Errorf("elevenlabs speech: voice_id is required")
 	}
@@ -100,6 +135,9 @@ func (p *Provider) DoSynthesize(ctx context.Context, params sdk.SpeechParams) (*
 // Uses the /v1/text-to-speech/{voice_id}/stream endpoint which returns chunked audio.
 func (p *Provider) DoStream(ctx context.Context, params sdk.SpeechParams) (*sdk.SpeechStreamResult, error) {
 	cfg := parseConfig(params.Config)
+	if params.Model != nil && params.Model.ID != "" {
+		cfg.ModelID = params.Model.ID
+	}
 	if cfg.VoiceID == "" {
 		return nil, fmt.Errorf("elevenlabs speech: voice_id is required")
 	}

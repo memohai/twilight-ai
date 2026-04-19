@@ -139,13 +139,26 @@ func TestProvider_DoSynthesize_HTTPError(t *testing.T) {
 func TestProvider_SpeechModel(t *testing.T) {
 	t.Parallel()
 	p := New()
-	m := p.SpeechModel("minimax-tts")
-	if m.ID != "minimax-tts" {
+	m := p.SpeechModel("speech-2.8")
+	if m.ID != "speech-2.8" {
 		t.Errorf("ID = %q", m.ID)
 	}
 	m2 := p.SpeechModel("")
-	if m2.ID != defaultModelID {
-		t.Errorf("default ID = %q, want %q", m2.ID, defaultModelID)
+	if m2.ID != defaultModel {
+		t.Errorf("default ID = %q, want %q", m2.ID, defaultModel)
+	}
+}
+
+func TestProvider_ListModels(t *testing.T) {
+	t.Parallel()
+	p := New()
+
+	models, err := p.ListModels(context.Background())
+	if err == nil {
+		t.Fatal("expected unsupported error")
+	}
+	if len(models) != 0 {
+		t.Fatalf("len(models) = %d, want 0", len(models))
 	}
 }
 

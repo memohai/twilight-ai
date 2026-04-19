@@ -163,6 +163,19 @@ func TestProvider_SpeechModel(t *testing.T) {
 	}
 }
 
+func TestProvider_ListModels(t *testing.T) {
+	t.Parallel()
+	p := New()
+
+	models, err := p.ListModels(context.Background())
+	if err == nil {
+		t.Fatal("expected unsupported error")
+	}
+	if len(models) != 0 {
+		t.Fatalf("len(models) = %d, want 0", len(models))
+	}
+}
+
 func TestParseConfig(t *testing.T) {
 	t.Parallel()
 	cfg := parseConfig(map[string]any{

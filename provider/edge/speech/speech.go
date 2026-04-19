@@ -2,6 +2,7 @@ package speech
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
@@ -45,6 +46,11 @@ func (p *Provider) SpeechModel(id string) *sdk.SpeechModel {
 		id = defaultModelID
 	}
 	return &sdk.SpeechModel{ID: id, Provider: p}
+}
+
+// ListModels returns the speech models exposed by this provider.
+func (p *Provider) ListModels(context.Context) ([]*sdk.SpeechModel, error) {
+	return nil, fmt.Errorf("edge speech: provider does not expose a remote models discovery API")
 }
 
 // DoSynthesize synthesizes speech and returns the complete audio.

@@ -763,7 +763,9 @@ type streamingBlock struct {
 
 func generateID() string {
 	b := make([]byte, 12)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic("anthropic: generateID entropy failure: " + err.Error())
+	}
 	return fmt.Sprintf("toolu_%x", b)
 }
 

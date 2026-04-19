@@ -49,7 +49,7 @@ func addUsage(total, step *Usage) Usage {
 // message (text/reasoning/tool-calls) and optionally a tool message.
 // The usage is attached to the assistant message for output tracking.
 func buildStepMessages(text, reasoning string, reasoningMeta map[string]any, toolCalls []ToolCall, toolResults []ToolResultPart, usage *Usage) []Message {
-	var assistantParts []MessagePart
+	assistantParts := make([]MessagePart, 0, len(toolCalls)+2)
 	if reasoning != "" {
 		assistantParts = append(assistantParts, ReasoningPart{Text: reasoning, ProviderMetadata: reasoningMeta})
 	}

@@ -108,13 +108,26 @@ func TestProvider_DoSynthesize_ConnectionFailure(t *testing.T) {
 func TestProvider_SpeechModel(t *testing.T) {
 	t.Parallel()
 	p := New()
-	m := p.SpeechModel("deepgram-tts")
-	if m.ID != "deepgram-tts" {
+	m := p.SpeechModel("aura-2-orpheus-en")
+	if m.ID != "aura-2-orpheus-en" {
 		t.Errorf("ID = %q", m.ID)
 	}
 	m2 := p.SpeechModel("")
-	if m2.ID != defaultModelID {
-		t.Errorf("default ID = %q, want %q", m2.ID, defaultModelID)
+	if m2.ID != defaultVoiceModel {
+		t.Errorf("default ID = %q, want %q", m2.ID, defaultVoiceModel)
+	}
+}
+
+func TestProvider_ListModels(t *testing.T) {
+	t.Parallel()
+	p := New()
+
+	models, err := p.ListModels(context.Background())
+	if err == nil {
+		t.Fatal("expected unsupported error")
+	}
+	if len(models) != 0 {
+		t.Fatalf("len(models) = %d, want 0", len(models))
 	}
 }
 

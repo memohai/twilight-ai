@@ -37,7 +37,7 @@ func executeTools(
 	sendProgress func(StreamPart),
 ) ([]ToolResultPart, error) {
 	results := make([]ToolResultPart, len(toolCalls))
-	var pending []pendingToolExec
+	pending := make([]pendingToolExec, 0, len(toolCalls))
 
 	// Phase 1: resolve tools and check approvals (sequential, user-facing).
 	for i, tc := range toolCalls {

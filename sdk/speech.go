@@ -4,6 +4,7 @@ import "context"
 
 // SpeechProvider is the interface that speech synthesis backends must implement.
 type SpeechProvider interface {
+	ListModels(ctx context.Context) ([]*SpeechModel, error)
 	DoSynthesize(ctx context.Context, params SpeechParams) (*SpeechResult, error)
 	DoStream(ctx context.Context, params SpeechParams) (*SpeechStreamResult, error)
 }

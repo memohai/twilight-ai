@@ -5,13 +5,14 @@ package speech
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	sdk "github.com/memohai/twilight-ai/sdk"
 )
 
 const (
-	defaultModelID    = "cosyvoice-tts"
+	defaultModelID    = "cosyvoice-v1"
 	defaultBaseURL    = "wss://dashscope.aliyuncs.com/api-ws/v1/inference/"
 	defaultModel      = "cosyvoice-v1"
 	defaultFormat     = "mp3"
@@ -51,14 +52,22 @@ func New(opts ...Option) *Provider {
 // SpeechModel creates a SpeechModel bound to this provider.
 func (p *Provider) SpeechModel(id string) *sdk.SpeechModel {
 	if id == "" {
-		id = defaultModelID
+		id = defaultModel
 	}
 	return &sdk.SpeechModel{ID: id, Provider: p}
+}
+
+// ListModels returns the speech models exposed by this provider.
+func (p *Provider) ListModels(context.Context) ([]*sdk.SpeechModel, error) {
+	return nil, fmt.Errorf("alibabacloud speech: provider does not expose a remote models discovery API")
 }
 
 // DoSynthesize synthesizes speech and returns the complete audio bytes.
 func (p *Provider) DoSynthesize(ctx context.Context, params sdk.SpeechParams) (*sdk.SpeechResult, error) {
 	cfg := parseConfig(params.Config)
+	if params.Model != nil && params.Model.ID != "" {
+		cfg.Model = params.Model.ID
+	}
 
 	audio, err := p.client.synthesize(ctx, params.Text, &cfg)
 	if err != nil {
@@ -73,6 +82,9 @@ func (p *Provider) DoSynthesize(ctx context.Context, params sdk.SpeechParams) (*
 // DoStream synthesizes speech and returns a streaming result.
 func (p *Provider) DoStream(ctx context.Context, params sdk.SpeechParams) (*sdk.SpeechStreamResult, error) {
 	cfg := parseConfig(params.Config)
+	if params.Model != nil && params.Model.ID != "" {
+		cfg.Model = params.Model.ID
+	}
 
 	ch, errCh := p.client.stream(ctx, params.Text, &cfg)
 	return sdk.NewSpeechStreamResult(ch, contentTypeForFormat(cfg.Format), errCh), nil

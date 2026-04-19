@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -70,6 +71,41 @@ func (p *Provider) SpeechModel(id string) *sdk.SpeechModel {
 		id = defaultModelID
 	}
 	return &sdk.SpeechModel{ID: id, Provider: p}
+}
+
+// ListModels returns the speech models exposed by this provider.
+func (p *Provider) ListModels(ctx context.Context) ([]*sdk.SpeechModel, error) {
+	type modelsListResponse struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+
+	resp, err := utils.FetchJSON[modelsListResponse](ctx, p.httpClient, &utils.RequestOptions{
+		Method:  http.MethodGet,
+		BaseURL: p.baseURL,
+		Path:    "/models",
+		Headers: map[string]string{"Authorization": "Bearer " + p.apiKey},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("openai speech: list models request failed: %w", err)
+	}
+
+	models := make([]*sdk.SpeechModel, 0, len(resp.Data))
+	for _, m := range resp.Data {
+		if isOpenAITTSModel(m.ID) {
+			models = append(models, p.SpeechModel(m.ID))
+		}
+	}
+	if len(models) == 0 {
+		return nil, errors.New("openai speech: no speech models returned by provider")
+	}
+	return models, nil
+}
+
+func isOpenAITTSModel(id string) bool {
+	id = strings.ToLower(id)
+	return strings.Contains(id, "tts") || strings.Contains(id, "audio")
 }
 
 // DoSynthesize synthesizes speech and returns the complete audio bytes.

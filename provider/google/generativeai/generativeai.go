@@ -663,7 +663,9 @@ func (p *Provider) authHeaders() map[string]string {
 
 func generateID() string {
 	b := make([]byte, 12)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic("generativeai: generateID entropy failure: " + err.Error())
+	}
 	return fmt.Sprintf("call_%x", b)
 }
 
