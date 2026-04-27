@@ -1,11 +1,6 @@
 package responses
 
-import (
-	"encoding/json"
-	"fmt"
-	"math"
-	"strconv"
-)
+import "encoding/json"
 
 // --- Request types ---
 
@@ -100,7 +95,7 @@ type responsesReasoningItem struct {
 
 type responsesResponse struct {
 	ID                string                `json:"id"`
-	CreatedAt         unixTimestamp         `json:"created_at"`
+	CreatedAt         int64                 `json:"created_at"`
 	Model             string                `json:"model"`
 	Output            []responsesOutputItem `json:"output"`
 	Usage             *responsesUsage       `json:"usage,omitempty"`
@@ -134,9 +129,6 @@ type responsesOutputItem struct {
 	CallID    string `json:"call_id,omitempty"`
 	Name      string `json:"name,omitempty"`
 	Arguments string `json:"arguments,omitempty"`
-
-	// type: "image_generation_call"
-	Result string `json:"result,omitempty"`
 }
 
 type responsesOutputContent struct {
@@ -175,47 +167,10 @@ type responsesOutputTokenDetails struct {
 type responsesCreatedChunk struct {
 	Type     string `json:"type"`
 	Response struct {
-		ID        string        `json:"id"`
-		CreatedAt unixTimestamp `json:"created_at"`
-		Model     string        `json:"model"`
+		ID        string `json:"id"`
+		CreatedAt int64  `json:"created_at"`
+		Model     string `json:"model"`
 	} `json:"response"`
-}
-
-type unixTimestamp int64
-
-func (t *unixTimestamp) UnmarshalJSON(data []byte) error {
-	if len(data) == 0 || string(data) == "null" {
-		*t = 0
-		return nil
-	}
-
-	var i int64
-	if err := json.Unmarshal(data, &i); err == nil {
-		*t = unixTimestamp(i)
-		return nil
-	}
-
-	var f float64
-	if err := json.Unmarshal(data, &f); err == nil {
-		*t = unixTimestamp(int64(math.Round(f)))
-		return nil
-	}
-
-	var s string
-	if err := json.Unmarshal(data, &s); err == nil {
-		if s == "" {
-			*t = 0
-			return nil
-		}
-		v, err := strconv.ParseFloat(s, 64)
-		if err != nil {
-			return fmt.Errorf("parse unix timestamp %q: %w", s, err)
-		}
-		*t = unixTimestamp(int64(math.Round(v)))
-		return nil
-	}
-
-	return fmt.Errorf("unsupported unix timestamp: %s", string(data))
 }
 
 // responsesOutputItemAddedChunk is sent for event: response.output_item.added
@@ -293,13 +248,6 @@ type responsesErrorChunk struct {
 		Code    string `json:"code"`
 		Message string `json:"message"`
 	} `json:"error"`
-}
-
-// responsesImageGenCompletedChunk is sent for event: response.image_generation_call.completed
-type responsesImageGenCompletedChunk struct {
-	Type   string `json:"type"`
-	ItemID string `json:"item_id"`
-	Result string `json:"result"` // base64-encoded image data
 }
 
 // --- Models API response types ---

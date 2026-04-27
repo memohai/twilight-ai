@@ -33,7 +33,7 @@ func executeTools(
 	ctx context.Context,
 	toolCalls []ToolCall,
 	toolMap map[string]*Tool,
-	approvalHandler func(context.Context, ToolCall) (bool, error),
+	approvalHandler func(context.Context, ToolCall) (ToolApprovalResult, error),
 	sendProgress func(StreamPart),
 ) ([]ToolResultPart, error) {
 	results := make([]ToolResultPart, len(toolCalls))
@@ -53,14 +53,6 @@ func executeTools(
 		}
 
 		if tool.RequireApproval {
-			if sendProgress != nil {
-				sendProgress(&ToolApprovalRequestPart{
-					ToolCallID: tc.ToolCallID,
-					ToolName:   tc.ToolName,
-					Input:      tc.Input,
-				})
-			}
-
 			if approvalHandler == nil {
 				if sendProgress != nil {
 					sendProgress(&ToolOutputDeniedPart{
@@ -77,12 +69,22 @@ func executeTools(
 				continue
 			}
 
-			approved, err := approvalHandler(ctx, tc)
+			approval, err := approvalHandler(ctx, tc)
 			if err != nil {
 				return nil, fmt.Errorf("twilightai: approval handler for %q: %w", tc.ToolName, err)
 			}
-			if !approved {
+			switch approval.Decision {
+			case "", ToolApprovalDecisionApproved:
+				// Continue to execution below.
+			case ToolApprovalDecisionRejected:
 				if sendProgress != nil {
+					sendProgress(&ToolApprovalRequestPart{
+						ApprovalID: approval.ApprovalID,
+						ToolCallID: tc.ToolCallID,
+						ToolName:   tc.ToolName,
+						Input:      tc.Input,
+						Metadata:   approval.Metadata,
+					})
 					sendProgress(&ToolOutputDeniedPart{
 						ToolCallID: tc.ToolCallID,
 						ToolName:   tc.ToolName,
@@ -91,10 +93,23 @@ func executeTools(
 				results[i] = ToolResultPart{
 					ToolCallID: tc.ToolCallID,
 					ToolName:   tc.ToolName,
-					Result:     "tool execution denied by user",
+					Result:     rejectedToolResultText(approval),
 					IsError:    true,
 				}
 				continue
+			case ToolApprovalDecisionDeferred:
+				if sendProgress != nil {
+					sendProgress(&ToolApprovalRequestPart{
+						ApprovalID: approval.ApprovalID,
+						ToolCallID: tc.ToolCallID,
+						ToolName:   tc.ToolName,
+						Input:      tc.Input,
+						Metadata:   approval.Metadata,
+					})
+				}
+				return nil, &ToolApprovalDeferredError{Approval: approval}
+			default:
+				return nil, fmt.Errorf("twilightai: unknown approval decision %q for %q", approval.Decision, tc.ToolName)
 			}
 		}
 
@@ -117,6 +132,13 @@ func executeTools(
 	}
 
 	return results, nil
+}
+
+func rejectedToolResultText(approval ToolApprovalResult) string {
+	if approval.Reason != "" {
+		return "tool execution denied by user: " + approval.Reason
+	}
+	return "tool execution denied by user"
 }
 
 func runTool(ctx context.Context, tc ToolCall, tool *Tool, sendProgress func(StreamPart)) ToolResultPart {

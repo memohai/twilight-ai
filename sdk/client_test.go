@@ -495,7 +495,7 @@ func TestClient_GenerateTextResult_ApprovalApproved(t *testing.T) {
 			},
 		}}),
 		sdk.WithMaxSteps(5),
-		sdk.WithApprovalHandler(func(_ context.Context, tc sdk.ToolCall) (bool, error) {
+		sdk.WithApprovalHandlerBool(func(_ context.Context, tc sdk.ToolCall) (bool, error) {
 			return true, nil
 		}),
 	)
@@ -540,7 +540,7 @@ func TestClient_GenerateTextResult_ApprovalDenied(t *testing.T) {
 			},
 		}}),
 		sdk.WithMaxSteps(5),
-		sdk.WithApprovalHandler(func(_ context.Context, tc sdk.ToolCall) (bool, error) {
+		sdk.WithApprovalHandlerBool(func(_ context.Context, tc sdk.ToolCall) (bool, error) {
 			return false, nil
 		}),
 	)
@@ -552,6 +552,57 @@ func TestClient_GenerateTextResult_ApprovalDenied(t *testing.T) {
 	}
 	if result.Text != "denied-response" {
 		t.Errorf("text: got %q", result.Text)
+	}
+}
+
+func TestClient_GenerateTextResult_ApprovalDeferred(t *testing.T) {
+	mp := &mockProvider{handler: func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+		if call != 1 {
+			t.Fatalf("unexpected provider call %d", call)
+		}
+		return &sdk.GenerateResult{
+			FinishReason: sdk.FinishReasonToolCalls,
+			ToolCalls: []sdk.ToolCall{{
+				ToolCallID: "c1", ToolName: "dangerous", Input: nil,
+			}},
+		}, nil
+	}}
+
+	executed := false
+	result, err := sdk.GenerateTextResult(context.Background(),
+		sdk.WithModel(mockModel(mp)),
+		sdk.WithMessages([]sdk.Message{sdk.UserMessage("do it")}),
+		sdk.WithTools([]sdk.Tool{{
+			Name:            "dangerous",
+			Parameters:      &jsonschema.Schema{Type: "object"},
+			RequireApproval: true,
+			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
+				executed = true
+				return "done", nil
+			},
+		}}),
+		sdk.WithMaxSteps(5),
+		sdk.WithApprovalHandler(func(_ context.Context, tc sdk.ToolCall) (sdk.ToolApprovalResult, error) {
+			return sdk.ToolApprovalResult{
+				Decision:   sdk.ToolApprovalDecisionDeferred,
+				ApprovalID: "approval-1",
+			}, nil
+		}),
+	)
+	if err != nil {
+		t.Fatalf("error: %v", err)
+	}
+	if executed {
+		t.Error("tool should not have executed while approval is deferred")
+	}
+	if result.DeferredToolApproval == nil || result.DeferredToolApproval.ApprovalID != "approval-1" {
+		t.Fatalf("missing deferred approval: %#v", result.DeferredToolApproval)
+	}
+	if len(result.Messages) != 1 || len(result.Messages[0].Content) == 0 {
+		t.Fatalf("expected assistant tool-call message, got %#v", result.Messages)
+	}
+	if mp.calls != 1 {
+		t.Fatalf("expected one provider call, got %d", mp.calls)
 	}
 }
 
@@ -747,7 +798,7 @@ func TestClient_StreamText_ApprovalFlow(t *testing.T) {
 			},
 		}}),
 		sdk.WithMaxSteps(5),
-		sdk.WithApprovalHandler(func(_ context.Context, tc sdk.ToolCall) (bool, error) {
+		sdk.WithApprovalHandlerBool(func(_ context.Context, tc sdk.ToolCall) (bool, error) {
 			return false, nil
 		}),
 	)
@@ -772,6 +823,80 @@ func TestClient_StreamText_ApprovalFlow(t *testing.T) {
 	}
 	if !gotDenied {
 		t.Error("expected ToolOutputDeniedPart")
+	}
+}
+
+func TestClient_StreamText_ApprovalDeferred(t *testing.T) {
+	mp := &mockProvider{handler: func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+		if call != 1 {
+			t.Fatalf("unexpected provider call %d", call)
+		}
+		return &sdk.GenerateResult{
+			FinishReason: sdk.FinishReasonToolCalls,
+			ToolCalls: []sdk.ToolCall{{
+				ToolCallID: "c1", ToolName: "rm_rf", Input: nil,
+			}},
+		}, nil
+	}}
+
+	executed := false
+	sr, err := sdk.StreamText(context.Background(),
+		sdk.WithModel(mockModel(mp)),
+		sdk.WithMessages([]sdk.Message{sdk.UserMessage("delete")}),
+		sdk.WithTools([]sdk.Tool{{
+			Name:            "rm_rf",
+			Parameters:      &jsonschema.Schema{Type: "object"},
+			RequireApproval: true,
+			Execute: func(ctx *sdk.ToolExecContext, input any) (any, error) {
+				executed = true
+				return "deleted", nil
+			},
+		}}),
+		sdk.WithMaxSteps(5),
+		sdk.WithApprovalHandler(func(_ context.Context, tc sdk.ToolCall) (sdk.ToolApprovalResult, error) {
+			return sdk.ToolApprovalResult{
+				Decision:   sdk.ToolApprovalDecisionDeferred,
+				ApprovalID: "approval-1",
+			}, nil
+		}),
+	)
+	if err != nil {
+		t.Fatalf("StreamText: %v", err)
+	}
+
+	var gotApprovalReq, gotFinish bool
+	for part := range sr.Stream {
+		switch p := part.(type) {
+		case *sdk.ToolApprovalRequestPart:
+			gotApprovalReq = true
+			if p.ApprovalID != "approval-1" {
+				t.Fatalf("approval id: got %q", p.ApprovalID)
+			}
+		case *sdk.StreamToolResultPart:
+			t.Fatal("did not expect tool result while approval is deferred")
+		case *sdk.ErrorPart:
+			t.Fatalf("stream error: %v", p.Error)
+		case *sdk.FinishPart:
+			gotFinish = true
+		}
+	}
+	if executed {
+		t.Error("tool should not have executed while approval is deferred")
+	}
+	if !gotApprovalReq {
+		t.Error("expected ToolApprovalRequestPart")
+	}
+	if !gotFinish {
+		t.Error("expected FinishPart")
+	}
+	if sr.DeferredToolApproval == nil || sr.DeferredToolApproval.ApprovalID != "approval-1" {
+		t.Fatalf("missing deferred approval: %#v", sr.DeferredToolApproval)
+	}
+	if len(sr.Messages) != 1 {
+		t.Fatalf("expected assistant tool-call message, got %#v", sr.Messages)
+	}
+	if mp.calls != 1 {
+		t.Fatalf("expected one provider call, got %d", mp.calls)
 	}
 }
 

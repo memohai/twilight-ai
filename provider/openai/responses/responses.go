@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/memohai/twilight-ai/internal/utils"
@@ -17,39 +16,21 @@ const (
 	defaultBaseURL = "https://api.openai.com/v1"
 
 	// Output item types for OpenAI Responses API
-	outputTypeMessage         = "message"
-	outputTypeReasoning       = "reasoning"
-	outputTypeFunctionCall    = "function_call"
-	outputTypeImageGeneration = "image_generation_call"
+	outputTypeMessage      = "message"
+	outputTypeReasoning    = "reasoning"
+	outputTypeFunctionCall = "function_call"
 )
 
 type Provider struct {
-	apiKey         string
-	baseURL        string
-	httpClient     *http.Client
-	prepareRequest func(*http.Request) error
+	apiKey     string
+	baseURL    string
+	httpClient *http.Client
 }
 
 type Option func(*Provider)
 
 func WithAPIKey(apiKey string) Option {
 	return func(p *Provider) { p.apiKey = apiKey }
-}
-
-// WithBedrockRegion enables AWS SigV4 authentication for Amazon Bedrock's
-// OpenAI-compatible endpoint using the default AWS credential chain.
-func WithBedrockRegion(region string) Option {
-	return func(p *Provider) {
-		p.prepareRequest = utils.NewBedrockDefaultCredentialsPreparer(region)
-	}
-}
-
-// WithBedrockCredentials enables AWS SigV4 authentication for Amazon Bedrock's
-// OpenAI-compatible endpoint using static credentials.
-func WithBedrockCredentials(region, accessKeyID, secretAccessKey, sessionToken string) Option {
-	return func(p *Provider) {
-		p.prepareRequest = utils.NewBedrockStaticCredentialsPreparer(region, accessKeyID, secretAccessKey, sessionToken)
-	}
 }
 
 func WithBaseURL(baseURL string) Option {
@@ -78,8 +59,7 @@ func (p *Provider) ListModels(ctx context.Context) ([]sdk.Model, error) {
 		Method:  http.MethodGet,
 		BaseURL: p.baseURL,
 		Path:    "/models",
-		Headers: p.authHeaders(),
-		Prepare: p.prepareRequest,
+		Headers: utils.AuthHeader(p.apiKey),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("openai-responses: list models request failed: %w", err)
@@ -102,8 +82,7 @@ func (p *Provider) Test(ctx context.Context) *sdk.ProviderTestResult {
 		BaseURL: p.baseURL,
 		Path:    "/models",
 		Query:   map[string]string{"limit": "1"},
-		Headers: p.authHeaders(),
-		Prepare: p.prepareRequest,
+		Headers: utils.AuthHeader(p.apiKey),
 	})
 	if err != nil {
 		return classifyError(err)
@@ -116,8 +95,7 @@ func (p *Provider) TestModel(ctx context.Context, modelID string) (*sdk.ModelTes
 		Method:  http.MethodGet,
 		BaseURL: p.baseURL,
 		Path:    "/models/" + modelID,
-		Headers: p.authHeaders(),
-		Prepare: p.prepareRequest,
+		Headers: utils.AuthHeader(p.apiKey),
 	})
 	if err == nil {
 		return &sdk.ModelTestResult{Supported: true, Message: "supported"}, nil
@@ -131,8 +109,7 @@ func (p *Provider) TestModel(ctx context.Context, modelID string) (*sdk.ModelTes
 		Method:  http.MethodPost,
 		BaseURL: p.baseURL,
 		Path:    "/responses",
-		Headers: p.authHeaders(),
-		Prepare: p.prepareRequest,
+		Headers: utils.AuthHeader(p.apiKey),
 		Body: map[string]any{
 			"model":             modelID,
 			"input":             "hi",
@@ -166,8 +143,7 @@ func (p *Provider) DoGenerate(ctx context.Context, params sdk.GenerateParams) (*
 		Method:  http.MethodPost,
 		BaseURL: p.baseURL,
 		Path:    "/responses",
-		Headers: p.authHeaders(),
-		Prepare: p.prepareRequest,
+		Headers: utils.AuthHeader(p.apiKey),
 		Body:    req,
 	})
 	if err != nil {
@@ -379,7 +355,7 @@ func (p *Provider) parseResponse(resp *responsesResponse) (*sdk.GenerateResult, 
 		Response: sdk.ResponseMetadata{
 			ID:        resp.ID,
 			ModelID:   resp.Model,
-			Timestamp: time.Unix(int64(resp.CreatedAt), 0),
+			Timestamp: time.Unix(resp.CreatedAt, 0),
 		},
 	}
 
@@ -443,14 +419,6 @@ func (p *Provider) parseResponse(resp *responsesResponse) (*sdk.GenerateResult, 
 				ToolName:   item.Name,
 				Input:      input,
 			})
-
-		case outputTypeImageGeneration:
-			if data := strings.TrimSpace(item.Result); data != "" {
-				result.Files = append(result.Files, sdk.GeneratedFile{
-					Data:      data,
-					MediaType: "image/png",
-				})
-			}
 		}
 	}
 
@@ -523,8 +491,7 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 			Method:  http.MethodPost,
 			BaseURL: p.baseURL,
 			Path:    "/responses",
-			Headers: p.authHeaders(),
-			Prepare: p.prepareRequest,
+			Headers: utils.AuthHeader(p.apiKey),
 			Body:    req,
 		}, func(ev *utils.SSEEvent) error {
 			eventType := ev.Event
@@ -546,7 +513,7 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 				}
 				responseID = chunk.Response.ID
 				responseModel = chunk.Response.Model
-				responseCreated = int64(chunk.Response.CreatedAt)
+				responseCreated = chunk.Response.CreatedAt
 
 			case "response.output_item.added":
 				var chunk responsesOutputItemAddedChunk
@@ -691,28 +658,6 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 					})
 				}
 
-			case "response.image_generation_call.completed":
-				var chunk responsesImageGenCompletedChunk
-				if err := json.Unmarshal([]byte(ev.Data), &chunk); err != nil {
-					return nil
-				}
-				if data := strings.TrimSpace(chunk.Result); data != "" {
-					if textStartSent {
-						send(&sdk.TextEndPart{ID: responseID})
-						textStartSent = false
-					}
-					if reasoningStartSent {
-						send(&sdk.ReasoningEndPart{ID: responseID})
-						reasoningStartSent = false
-					}
-					send(&sdk.StreamFilePart{
-						File: sdk.GeneratedFile{
-							Data:      data,
-							MediaType: "image/png",
-						},
-					})
-				}
-
 			case "response.completed", "response.incomplete":
 				var chunk responsesCompletedChunk
 				if err := json.Unmarshal([]byte(ev.Data), &chunk); err != nil {
@@ -773,16 +718,6 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 	}()
 
 	return &sdk.StreamResult{Stream: ch}, nil
-}
-
-func (p *Provider) authHeaders() map[string]string {
-	if p.prepareRequest != nil {
-		return nil
-	}
-	if p.apiKey == "" {
-		return nil
-	}
-	return utils.AuthHeader(p.apiKey)
 }
 
 // ---------- helpers ----------

@@ -15,7 +15,7 @@ type generateConfig struct {
 	OnFinish        func(*GenerateResult)
 	OnStep          func(*StepResult) *GenerateParams
 	PrepareStep     func(*GenerateParams) *GenerateParams
-	ApprovalHandler func(ctx context.Context, call ToolCall) (bool, error)
+	ApprovalHandler func(ctx context.Context, call ToolCall) (ToolApprovalResult, error)
 }
 
 // GenerateOption configures a text generation request.
@@ -109,8 +109,24 @@ func WithPrepareStep(fn func(*GenerateParams) *GenerateParams) GenerateOption {
 	return func(c *generateConfig) { c.PrepareStep = fn }
 }
 
-// WithApprovalHandler registers a function that decides whether a tool call
-// marked with RequireApproval should proceed. Return (true, nil) to approve.
-func WithApprovalHandler(fn func(ctx context.Context, call ToolCall) (bool, error)) GenerateOption {
+// WithApprovalHandler registers a function that decides how to handle a tool
+// call marked with RequireApproval.
+func WithApprovalHandler(fn func(ctx context.Context, call ToolCall) (ToolApprovalResult, error)) GenerateOption {
 	return func(c *generateConfig) { c.ApprovalHandler = fn }
+}
+
+// WithApprovalHandlerBool adapts the original bool-based approval callback.
+func WithApprovalHandlerBool(fn func(ctx context.Context, call ToolCall) (bool, error)) GenerateOption {
+	return func(c *generateConfig) {
+		c.ApprovalHandler = func(ctx context.Context, call ToolCall) (ToolApprovalResult, error) {
+			approved, err := fn(ctx, call)
+			if err != nil {
+				return ToolApprovalResult{}, err
+			}
+			if approved {
+				return ToolApprovalResult{Decision: ToolApprovalDecisionApproved}, nil
+			}
+			return ToolApprovalResult{Decision: ToolApprovalDecisionRejected}, nil
+		}
+	}
 }

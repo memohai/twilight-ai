@@ -147,6 +147,7 @@ type ToolApprovalRequestPart struct {
 	ToolCallID string
 	ToolName   string
 	Input      any
+	Metadata   map[string]any
 }
 
 func (p *ToolApprovalRequestPart) Type() StreamPartType { return StreamPartTypeToolApprovalRequest }
@@ -232,7 +233,8 @@ type StreamResult struct {
 	Steps []StepResult
 	// Messages holds all output messages across all steps (assistant + tool),
 	// excluding the original input messages. Populated as the stream is consumed.
-	Messages []Message
+	Messages             []Message
+	DeferredToolApproval *ToolApprovalResult
 }
 
 // Text consumes the entire stream and returns the concatenated text content.
@@ -289,5 +291,8 @@ func (sr *StreamResult) ToResult() (*GenerateResult, error) {
 	}
 
 	result.Reasoning = reasoning
+	result.Steps = sr.Steps
+	result.Messages = sr.Messages
+	result.DeferredToolApproval = sr.DeferredToolApproval
 	return result, nil
 }

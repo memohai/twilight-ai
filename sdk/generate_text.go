@@ -1,6 +1,9 @@
 package sdk
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
 func (c *Client) GenerateText(ctx context.Context, options ...GenerateOption) (string, error) {
 	result, err := c.GenerateTextResult(ctx, options...)
@@ -56,10 +59,6 @@ func (c *Client) GenerateTextResult(ctx context.Context, options ...GenerateOpti
 	)
 
 	for step := 0; shouldContinueLoop(cfg.MaxSteps, step); step++ {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-
 		if step > 0 {
 			messages = applyPrepareStep(cfg, messages)
 		}
@@ -96,6 +95,26 @@ func (c *Client) GenerateTextResult(ctx context.Context, options ...GenerateOpti
 		// Execute tools
 		toolResults, err := executeTools(ctx, result.ToolCalls, toolMap, cfg.ApprovalHandler, nil)
 		if err != nil {
+			var deferred *ToolApprovalDeferredError
+			if errors.As(err, &deferred) {
+				stepMsgs := buildStepMessages(result.Text, result.Reasoning, result.ReasoningProviderMetadata, result.ToolCalls, nil, &result.Usage)
+				sr := StepResult{
+					Text:                 result.Text,
+					Reasoning:            result.Reasoning,
+					FinishReason:         result.FinishReason,
+					RawFinishReason:      result.RawFinishReason,
+					Usage:                result.Usage,
+					ToolCalls:            result.ToolCalls,
+					Response:             result.Response,
+					DeferredToolApproval: &deferred.Approval,
+					Messages:             stepMsgs,
+				}
+				allSteps = append(allSteps, sr)
+				allMessages = append(allMessages, stepMsgs...)
+				applyOnStep(cfg, &sr)
+				result.DeferredToolApproval = &deferred.Approval
+				break
+			}
 			return nil, err
 		}
 
@@ -122,6 +141,14 @@ func (c *Client) GenerateTextResult(ctx context.Context, options ...GenerateOpti
 		lastResult.Usage = totalUsage
 		lastResult.Steps = allSteps
 		lastResult.Messages = allMessages
+		if lastResult.DeferredToolApproval == nil {
+			for i := range allSteps {
+				if allSteps[i].DeferredToolApproval != nil {
+					lastResult.DeferredToolApproval = allSteps[i].DeferredToolApproval
+					break
+				}
+			}
+		}
 	}
 
 	if cfg.OnFinish != nil && lastResult != nil {

@@ -2,6 +2,7 @@ package sdk
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
@@ -46,10 +47,6 @@ func (c *Client) StreamText(ctx context.Context, options ...GenerateOption) (*St
 		var allMessages []Message
 
 		for step := 0; shouldContinueLoop(cfg.MaxSteps, step); step++ {
-			if ctx.Err() != nil {
-				break
-			}
-
 			if step > 0 {
 				messages = applyPrepareStep(cfg, messages)
 			}
@@ -104,10 +101,6 @@ func (c *Client) StreamText(ctx context.Context, options ...GenerateOption) (*St
 				}
 			}
 
-			if ctx.Err() != nil {
-				break
-			}
-
 			totalUsage = addUsage(&totalUsage, &stepUsage)
 
 			// No tool calls or not a tool-calls finish → done
@@ -133,6 +126,25 @@ func (c *Client) StreamText(ctx context.Context, options ...GenerateOption) (*St
 			sendProgress := func(part StreamPart) { send(part) }
 			toolResults, err := executeTools(ctx, stepToolCalls, toolMap, cfg.ApprovalHandler, sendProgress)
 			if err != nil {
+				var deferred *ToolApprovalDeferredError
+				if errors.As(err, &deferred) {
+					stepMsgs := buildStepMessages(stepText, stepReasoning, stepReasoningMeta, stepToolCalls, nil, &stepUsage)
+					stepR := StepResult{
+						Text:                 stepText,
+						Reasoning:            stepReasoning,
+						FinishReason:         lastFinishReason,
+						RawFinishReason:      lastRawFinishReason,
+						Usage:                stepUsage,
+						ToolCalls:            stepToolCalls,
+						Response:             stepResponse,
+						DeferredToolApproval: &deferred.Approval,
+						Messages:             stepMsgs,
+					}
+					allSteps = append(allSteps, stepR)
+					allMessages = append(allMessages, stepMsgs...)
+					applyOnStep(cfg, &stepR)
+					break
+				}
 				send(&ErrorPart{Error: err})
 				break
 			}
@@ -161,6 +173,12 @@ func (c *Client) StreamText(ctx context.Context, options ...GenerateOption) (*St
 		// so these are safe to read after consumption.
 		sr.Steps = allSteps
 		sr.Messages = allMessages
+		for i := range allSteps {
+			if allSteps[i].DeferredToolApproval != nil {
+				sr.DeferredToolApproval = allSteps[i].DeferredToolApproval
+				break
+			}
+		}
 
 		send(&FinishPart{
 			FinishReason:    lastFinishReason,
@@ -170,11 +188,12 @@ func (c *Client) StreamText(ctx context.Context, options ...GenerateOption) (*St
 
 		if cfg.OnFinish != nil {
 			cfg.OnFinish(&GenerateResult{
-				FinishReason:    lastFinishReason,
-				RawFinishReason: lastRawFinishReason,
-				Usage:           totalUsage,
-				Steps:           allSteps,
-				Messages:        allMessages,
+				FinishReason:         lastFinishReason,
+				RawFinishReason:      lastRawFinishReason,
+				Usage:                totalUsage,
+				Steps:                allSteps,
+				Messages:             allMessages,
+				DeferredToolApproval: sr.DeferredToolApproval,
 			})
 		}
 

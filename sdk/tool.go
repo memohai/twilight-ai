@@ -1,6 +1,10 @@
 package sdk
 
-import "context"
+import (
+	"context"
+	"errors"
+	"fmt"
+)
 
 // ToolExecuteFunc is the signature for a tool's execution handler.
 // input is the parsed arguments from the LLM. The return value becomes the
@@ -14,6 +18,41 @@ type ToolExecContext struct {
 	ToolCallID   string
 	ToolName     string
 	SendProgress func(content any) // nil when not in streaming mode
+}
+
+type ToolApprovalDecision string
+
+const (
+	ToolApprovalDecisionApproved ToolApprovalDecision = "approved"
+	ToolApprovalDecisionRejected ToolApprovalDecision = "rejected"
+	ToolApprovalDecisionDeferred ToolApprovalDecision = "deferred"
+)
+
+type ToolApprovalResult struct {
+	Decision   ToolApprovalDecision `json:"decision"`
+	ApprovalID string               `json:"approvalId,omitempty"`
+	Reason     string               `json:"reason,omitempty"`
+	Metadata   map[string]any       `json:"metadata,omitempty"`
+}
+
+var ErrToolApprovalDeferred = errors.New("tool approval deferred")
+
+type ToolApprovalDeferredError struct {
+	Approval ToolApprovalResult
+}
+
+func (e *ToolApprovalDeferredError) Error() string {
+	if e == nil {
+		return ErrToolApprovalDeferred.Error()
+	}
+	if e.Approval.ApprovalID == "" {
+		return ErrToolApprovalDeferred.Error()
+	}
+	return fmt.Sprintf("%s: %s", ErrToolApprovalDeferred, e.Approval.ApprovalID)
+}
+
+func (e *ToolApprovalDeferredError) Is(target error) bool {
+	return target == ErrToolApprovalDeferred
 }
 
 type Tool struct {
