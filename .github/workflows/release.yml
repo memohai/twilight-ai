@@ -8,6 +8,16 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      from:
+        description: 'Previous tag (e.g. v0.3.3). Leave empty for auto-detect.'
+        required: false
+        type: string
+      to:
+        description: 'Current tag to release (e.g. v0.4.0). Leave empty for auto-detect.'
+        required: false
+        type: string
 
 jobs:
   release:
@@ -24,6 +34,13 @@ jobs:
           node-version: lts/*
           registry-url: https://registry.npmjs.org/
 
-      - run: pnpm dlx changelogithub
+      - name: Run changelogithub
         env:
           GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+          INPUT_FROM: ${{ inputs.from }}
+          INPUT_TO: ${{ inputs.to }}
+        run: |
+          args=()
+          if [ -n "$INPUT_FROM" ]; then args+=(--from "$INPUT_FROM"); fi
+          if [ -n "$INPUT_TO" ]; then args+=(--to "$INPUT_TO"); fi
+          pnpm dlx changelogithub "${args[@]}"
