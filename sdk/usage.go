@@ -4,6 +4,12 @@ type InputTokenDetail struct {
 	NoCacheTokens    int `json:"noCacheTokens"`
 	CacheReadTokens  int `json:"cacheReadTokens"`
 	CacheWriteTokens int `json:"cacheWriteTokens"`
+	// CacheWrite5mTokens is the number of tokens written to the 5-minute cache
+	// (Anthropic-specific, populated when using cache_control with default TTL).
+	CacheWrite5mTokens int `json:"cacheWrite5mTokens,omitempty"`
+	// CacheWrite1hTokens is the number of tokens written to the 1-hour cache
+	// (Anthropic-specific, populated when using cache_control with ttl="1h").
+	CacheWrite1hTokens int `json:"cacheWrite1hTokens,omitempty"`
 }
 
 type OutputTokenDetail struct {

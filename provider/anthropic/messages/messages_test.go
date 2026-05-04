@@ -768,7 +768,307 @@ func TestDoGenerate_ReasoningFromOtherProvider(t *testing.T) {
 	}
 }
 
-func TestDoGenerate_CacheUsage(t *testing.T) {
+func TestDoGenerate_CacheControl_SystemBlock(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			System []struct {
+				Type         string `json:"type"`
+				Text         string `json:"text"`
+				CacheControl *struct {
+					Type string `json:"type"`
+					TTL  string `json:"ttl,omitempty"`
+				} `json:"cache_control,omitempty"`
+			} `json:"system"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+
+		if len(body.System) != 1 {
+			t.Fatalf("expected 1 system block, got %d", len(body.System))
+		}
+		s := body.System[0]
+		if s.Text != "You are a helpful assistant." {
+			t.Errorf("system text: got %q", s.Text)
+		}
+		if s.CacheControl == nil {
+			t.Fatal("expected cache_control on system block, got nil")
+		}
+		if s.CacheControl.Type != "ephemeral" {
+			t.Errorf("cache_control type: got %q, want ephemeral", s.CacheControl.Type)
+		}
+		if s.CacheControl.TTL != "" {
+			t.Errorf("cache_control ttl: got %q, want empty (5m default)", s.CacheControl.TTL)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id": "msg_cc_sys", "type": "message", "model": "claude-sonnet-4-20250514", "role": "assistant",
+			"content":     []map[string]any{{"type": "text", "text": "OK"}},
+			"stop_reason": "end_turn",
+			"usage":       map[string]any{"input_tokens": 10, "output_tokens": 1},
+		})
+	}))
+	defer srv.Close()
+
+	p := messages.New(messages.WithAPIKey("k"), messages.WithBaseURL(srv.URL))
+	_, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model: &sdk.Model{ID: "claude-sonnet-4-20250514"},
+		Messages: []sdk.Message{
+			{
+				Role: sdk.MessageRoleSystem,
+				Content: []sdk.MessagePart{
+					sdk.TextPart{
+						Text:         "You are a helpful assistant.",
+						CacheControl: &sdk.CacheControl{Type: "ephemeral"},
+					},
+				},
+			},
+			sdk.UserMessage("Hi"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate: %v", err)
+	}
+}
+
+func TestDoGenerate_CacheControl_SystemBlock_1h(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			System []struct {
+				Type         string `json:"type"`
+				CacheControl *struct {
+					Type string `json:"type"`
+					TTL  string `json:"ttl,omitempty"`
+				} `json:"cache_control,omitempty"`
+			} `json:"system"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+
+		if len(body.System) != 1 {
+			t.Fatalf("expected 1 system block, got %d", len(body.System))
+		}
+		if body.System[0].CacheControl == nil {
+			t.Fatal("expected cache_control on system block, got nil")
+		}
+		if body.System[0].CacheControl.TTL != "1h" {
+			t.Errorf("cache_control ttl: got %q, want 1h", body.System[0].CacheControl.TTL)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id": "msg_cc_sys_1h", "type": "message", "model": "claude-sonnet-4-20250514", "role": "assistant",
+			"content":     []map[string]any{{"type": "text", "text": "OK"}},
+			"stop_reason": "end_turn",
+			"usage":       map[string]any{"input_tokens": 10, "output_tokens": 1},
+		})
+	}))
+	defer srv.Close()
+
+	p := messages.New(messages.WithAPIKey("k"), messages.WithBaseURL(srv.URL))
+	_, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model: &sdk.Model{ID: "claude-sonnet-4-20250514"},
+		Messages: []sdk.Message{
+			{
+				Role: sdk.MessageRoleSystem,
+				Content: []sdk.MessagePart{
+					sdk.TextPart{
+						Text:         "You are a helpful assistant.",
+						CacheControl: &sdk.CacheControl{Type: "ephemeral", TTL: "1h"},
+					},
+				},
+			},
+			sdk.UserMessage("Hi"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate: %v", err)
+	}
+}
+
+func TestDoGenerate_CacheControl_MessageBlock(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content []struct {
+					Type         string `json:"type"`
+					Text         string `json:"text,omitempty"`
+					CacheControl *struct {
+						Type string `json:"type"`
+						TTL  string `json:"ttl,omitempty"`
+					} `json:"cache_control,omitempty"`
+				} `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+
+		if len(body.Messages) != 1 {
+			t.Fatalf("expected 1 message, got %d", len(body.Messages))
+		}
+		msg := body.Messages[0]
+		if msg.Role != "user" {
+			t.Errorf("role: got %q", msg.Role)
+		}
+		if len(msg.Content) != 2 {
+			t.Fatalf("expected 2 content blocks, got %d", len(msg.Content))
+		}
+
+		// first block: regular text, no cache_control
+		if msg.Content[0].CacheControl != nil {
+			t.Error("first block should not have cache_control")
+		}
+		// second block: long doc with cache_control
+		if msg.Content[1].CacheControl == nil {
+			t.Fatal("second block: expected cache_control, got nil")
+		}
+		if msg.Content[1].CacheControl.Type != "ephemeral" {
+			t.Errorf("second block cache_control type: got %q", msg.Content[1].CacheControl.Type)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id": "msg_cc_user", "type": "message", "model": "claude-sonnet-4-20250514", "role": "assistant",
+			"content":     []map[string]any{{"type": "text", "text": "Got it"}},
+			"stop_reason": "end_turn",
+			"usage":       map[string]any{"input_tokens": 50, "output_tokens": 3},
+		})
+	}))
+	defer srv.Close()
+
+	p := messages.New(messages.WithAPIKey("k"), messages.WithBaseURL(srv.URL))
+	_, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model: &sdk.Model{ID: "claude-sonnet-4-20250514"},
+		Messages: []sdk.Message{
+			{
+				Role: sdk.MessageRoleUser,
+				Content: []sdk.MessagePart{
+					sdk.TextPart{Text: "Summarize this document:"},
+					sdk.TextPart{
+						Text:         "<very long document content>",
+						CacheControl: &sdk.CacheControl{Type: "ephemeral"},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate: %v", err)
+	}
+}
+
+func TestDoGenerate_CacheControl_Tools(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Tools []struct {
+				Name         string `json:"name"`
+				CacheControl *struct {
+					Type string `json:"type"`
+					TTL  string `json:"ttl,omitempty"`
+				} `json:"cache_control,omitempty"`
+			} `json:"tools"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+
+		if len(body.Tools) != 2 {
+			t.Fatalf("expected 2 tools, got %d", len(body.Tools))
+		}
+
+		// first tool: no cache_control
+		if body.Tools[0].CacheControl != nil {
+			t.Error("first tool should not have cache_control")
+		}
+		// last tool: cache_control set (Anthropic caches up to and including this point)
+		if body.Tools[1].CacheControl == nil {
+			t.Fatal("second tool: expected cache_control, got nil")
+		}
+		if body.Tools[1].CacheControl.Type != "ephemeral" {
+			t.Errorf("second tool cache_control type: got %q", body.Tools[1].CacheControl.Type)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id": "msg_cc_tools", "type": "message", "model": "claude-sonnet-4-20250514", "role": "assistant",
+			"content":     []map[string]any{{"type": "text", "text": "Ready"}},
+			"stop_reason": "end_turn",
+			"usage":       map[string]any{"input_tokens": 30, "output_tokens": 1},
+		})
+	}))
+	defer srv.Close()
+
+	p := messages.New(messages.WithAPIKey("k"), messages.WithBaseURL(srv.URL))
+	_, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model: &sdk.Model{ID: "claude-sonnet-4-20250514"},
+		Messages: []sdk.Message{sdk.UserMessage("Hi")},
+		Tools: []sdk.Tool{
+			{Name: "search", Description: "Search the web", Parameters: map[string]any{"type": "object"}},
+			{
+				Name:         "calculator",
+				Description:  "Do math",
+				Parameters:   map[string]any{"type": "object"},
+				CacheControl: &sdk.CacheControl{Type: "ephemeral"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate: %v", err)
+	}
+}
+
+func TestDoGenerate_CacheControl_DetailedUsage(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id": "msg_cc_usage", "type": "message", "model": "claude-sonnet-4-20250514", "role": "assistant",
+			"content":     []map[string]any{{"type": "text", "text": "OK"}},
+			"stop_reason": "end_turn",
+			"usage": map[string]any{
+				"input_tokens":                  10,
+				"output_tokens":                 5,
+				"cache_creation_input_tokens":   556,
+				"cache_read_input_tokens":       200,
+				"cache_creation": map[string]any{
+					"ephemeral_5m_input_tokens": 456,
+					"ephemeral_1h_input_tokens": 100,
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	p := messages.New(messages.WithAPIKey("k"), messages.WithBaseURL(srv.URL))
+	result, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model:    &sdk.Model{ID: "claude-sonnet-4-20250514"},
+		Messages: []sdk.Message{sdk.UserMessage("hi")},
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate: %v", err)
+	}
+
+	if result.Usage.CachedInputTokens != 200 {
+		t.Errorf("CachedInputTokens: got %d, want 200", result.Usage.CachedInputTokens)
+	}
+	if result.Usage.InputTokenDetails.CacheReadTokens != 200 {
+		t.Errorf("CacheReadTokens: got %d, want 200", result.Usage.InputTokenDetails.CacheReadTokens)
+	}
+	if result.Usage.InputTokenDetails.CacheWriteTokens != 556 {
+		t.Errorf("CacheWriteTokens: got %d, want 556", result.Usage.InputTokenDetails.CacheWriteTokens)
+	}
+	if result.Usage.InputTokenDetails.CacheWrite5mTokens != 456 {
+		t.Errorf("CacheWrite5mTokens: got %d, want 456", result.Usage.InputTokenDetails.CacheWrite5mTokens)
+	}
+	if result.Usage.InputTokenDetails.CacheWrite1hTokens != 100 {
+		t.Errorf("CacheWrite1hTokens: got %d, want 100", result.Usage.InputTokenDetails.CacheWrite1hTokens)
+	}
+}
+
+
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{

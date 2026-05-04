@@ -61,4 +61,7 @@ type Tool struct {
 	Parameters      any             `json:"parameters"` // *jsonschema.Schema, or a Go struct for automatic inference
 	Execute         ToolExecuteFunc `json:"-"`
 	RequireApproval bool            `json:"-"`
+	// CacheControl enables prompt caching for this tool's definition.
+	// Only supported by Anthropic; other providers ignore this field.
+	CacheControl *CacheControl `json:"-"`
 }

@@ -29,10 +29,20 @@ type MessagePart interface {
 	PartType() MessagePartType
 }
 
+// CacheControl specifies caching behaviour for a content block.
+// Anthropic currently supports Type "ephemeral" with an optional TTL.
+// Leave TTL empty for the default 5-minute cache; set TTL to "1h" for a
+// 1-hour cache (billed at a higher rate).
+type CacheControl struct {
+	Type string `json:"type"`          // "ephemeral"
+	TTL  string `json:"ttl,omitempty"` // "" (5 min, default) | "1h"
+}
+
 // --- Text ---
 
 type TextPart struct {
 	Text             string         `json:"text"`
+	CacheControl     *CacheControl  `json:"cacheControl,omitempty"`
 	ProviderMetadata map[string]any `json:"providerMetadata,omitempty"`
 }
 
@@ -50,8 +60,9 @@ func (p ReasoningPart) PartType() MessagePartType { return MessagePartTypeReason
 // --- Image ---
 
 type ImagePart struct {
-	Image     string `json:"image"`
-	MediaType string `json:"mediaType,omitempty"`
+	Image        string        `json:"image"`
+	MediaType    string        `json:"mediaType,omitempty"`
+	CacheControl *CacheControl `json:"cacheControl,omitempty"`
 }
 
 func (p ImagePart) PartType() MessagePartType { return MessagePartTypeImage }
@@ -59,9 +70,10 @@ func (p ImagePart) PartType() MessagePartType { return MessagePartTypeImage }
 // --- File ---
 
 type FilePart struct {
-	Data      string `json:"data"`
-	MediaType string `json:"mediaType,omitempty"`
-	Filename  string `json:"filename,omitempty"`
+	Data         string        `json:"data"`
+	MediaType    string        `json:"mediaType,omitempty"`
+	Filename     string        `json:"filename,omitempty"`
+	CacheControl *CacheControl `json:"cacheControl,omitempty"`
 }
 
 func (p FilePart) PartType() MessagePartType { return MessagePartTypeFile }
@@ -128,10 +140,10 @@ func ToolMessage(results ...ToolResultPart) Message {
 // --- JSON ---
 
 func (m Message) MarshalJSON() ([]byte, error) {
-	// Single TextPart with no metadata → emit content as a plain string.
+	// Single TextPart with no metadata and no cache control → emit content as a plain string.
 	var content any
 	if len(m.Content) == 1 {
-		if tp, ok := m.Content[0].(TextPart); ok && len(tp.ProviderMetadata) == 0 {
+		if tp, ok := m.Content[0].(TextPart); ok && len(tp.ProviderMetadata) == 0 && tp.CacheControl == nil {
 			content = tp.Text
 		}
 	}
