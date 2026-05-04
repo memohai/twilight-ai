@@ -22,9 +22,10 @@ const (
 )
 
 type Provider struct {
-	apiKey     string
-	baseURL    string
-	httpClient *http.Client
+	apiKey         string
+	baseURL        string
+	httpClient     *http.Client
+	prepareRequest func(*http.Request) error
 }
 
 type Option func(*Provider)
@@ -39,6 +40,22 @@ func WithBaseURL(baseURL string) Option {
 
 func WithHTTPClient(client *http.Client) Option {
 	return func(p *Provider) { p.httpClient = client }
+}
+
+// WithBedrockRegion enables AWS SigV4 authentication for Amazon Bedrock's
+// OpenAI-compatible Responses endpoint using the default AWS credential chain.
+func WithBedrockRegion(region string) Option {
+	return func(p *Provider) {
+		p.prepareRequest = utils.NewBedrockDefaultCredentialsPreparer(region)
+	}
+}
+
+// WithBedrockCredentials enables AWS SigV4 authentication for Amazon Bedrock's
+// OpenAI-compatible Responses endpoint using static credentials.
+func WithBedrockCredentials(region, accessKeyID, secretAccessKey, sessionToken string) Option {
+	return func(p *Provider) {
+		p.prepareRequest = utils.NewBedrockStaticCredentialsPreparer(region, accessKeyID, secretAccessKey, sessionToken)
+	}
 }
 
 func New(options ...Option) *Provider {
@@ -56,10 +73,11 @@ func (p *Provider) Name() string { return "openai-responses" }
 
 func (p *Provider) ListModels(ctx context.Context) ([]sdk.Model, error) {
 	resp, err := utils.FetchJSON[modelsListResponse](ctx, p.httpClient, &utils.RequestOptions{
-		Method:  http.MethodGet,
-		BaseURL: p.baseURL,
-		Path:    "/models",
-		Headers: utils.AuthHeader(p.apiKey),
+		Method:   http.MethodGet,
+		BaseURL:  p.baseURL,
+		Path:     "/models",
+		Headers:  p.authHeaders(),
+		Prepare:  p.prepareRequest,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("openai-responses: list models request failed: %w", err)
@@ -78,11 +96,12 @@ func (p *Provider) ListModels(ctx context.Context) ([]sdk.Model, error) {
 
 func (p *Provider) Test(ctx context.Context) *sdk.ProviderTestResult {
 	_, err := utils.FetchJSON[modelsListResponse](ctx, p.httpClient, &utils.RequestOptions{
-		Method:  http.MethodGet,
-		BaseURL: p.baseURL,
-		Path:    "/models",
-		Query:   map[string]string{"limit": "1"},
-		Headers: utils.AuthHeader(p.apiKey),
+		Method:   http.MethodGet,
+		BaseURL:  p.baseURL,
+		Path:     "/models",
+		Query:    map[string]string{"limit": "1"},
+		Headers:  p.authHeaders(),
+		Prepare:  p.prepareRequest,
 	})
 	if err != nil {
 		return classifyError(err)
@@ -92,10 +111,11 @@ func (p *Provider) Test(ctx context.Context) *sdk.ProviderTestResult {
 
 func (p *Provider) TestModel(ctx context.Context, modelID string) (*sdk.ModelTestResult, error) {
 	_, err := utils.FetchJSON[modelObject](ctx, p.httpClient, &utils.RequestOptions{
-		Method:  http.MethodGet,
-		BaseURL: p.baseURL,
-		Path:    "/models/" + modelID,
-		Headers: utils.AuthHeader(p.apiKey),
+		Method:   http.MethodGet,
+		BaseURL:  p.baseURL,
+		Path:     "/models/" + modelID,
+		Headers:  p.authHeaders(),
+		Prepare:  p.prepareRequest,
 	})
 	if err == nil {
 		return &sdk.ModelTestResult{Supported: true, Message: "supported"}, nil
@@ -106,10 +126,11 @@ func (p *Provider) TestModel(ctx context.Context, modelID string) (*sdk.ModelTes
 	}
 
 	status, probeErr := utils.ProbeStatus(ctx, p.httpClient, &utils.RequestOptions{
-		Method:  http.MethodPost,
-		BaseURL: p.baseURL,
-		Path:    "/responses",
-		Headers: utils.AuthHeader(p.apiKey),
+		Method:   http.MethodPost,
+		BaseURL:  p.baseURL,
+		Path:     "/responses",
+		Headers:  p.authHeaders(),
+		Prepare:  p.prepareRequest,
 		Body: map[string]any{
 			"model":             modelID,
 			"input":             "hi",
@@ -130,6 +151,16 @@ func (p *Provider) ChatModel(id string) *sdk.Model {
 	}
 }
 
+func (p *Provider) authHeaders() map[string]string {
+	if p.prepareRequest != nil {
+		return nil
+	}
+	if p.apiKey == "" {
+		return nil
+	}
+	return utils.AuthHeader(p.apiKey)
+}
+
 // ---------- DoGenerate ----------
 
 func (p *Provider) DoGenerate(ctx context.Context, params sdk.GenerateParams) (*sdk.GenerateResult, error) { //nolint:gocritic // interface method
@@ -140,11 +171,12 @@ func (p *Provider) DoGenerate(ctx context.Context, params sdk.GenerateParams) (*
 	req := p.buildRequest(&params)
 
 	resp, err := utils.FetchJSON[responsesResponse](ctx, p.httpClient, &utils.RequestOptions{
-		Method:  http.MethodPost,
-		BaseURL: p.baseURL,
-		Path:    "/responses",
-		Headers: utils.AuthHeader(p.apiKey),
-		Body:    req,
+		Method:   http.MethodPost,
+		BaseURL:  p.baseURL,
+		Path:     "/responses",
+		Headers:  p.authHeaders(),
+		Prepare:  p.prepareRequest,
+		Body:     req,
 	})
 	if err != nil {
 		var apiErr *utils.APIError
@@ -488,11 +520,12 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 		}
 
 		err := utils.FetchSSE(ctx, p.httpClient, &utils.RequestOptions{
-			Method:  http.MethodPost,
-			BaseURL: p.baseURL,
-			Path:    "/responses",
-			Headers: utils.AuthHeader(p.apiKey),
-			Body:    req,
+			Method:   http.MethodPost,
+			BaseURL:  p.baseURL,
+			Path:     "/responses",
+			Headers:  p.authHeaders(),
+			Prepare:  p.prepareRequest,
+			Body:     req,
 		}, func(ev *utils.SSEEvent) error {
 			eventType := ev.Event
 			if eventType == "" {

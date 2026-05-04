@@ -3,18 +3,18 @@ package messages
 // --- Request types ---
 
 type messagesRequest struct {
-	Model         string                `json:"model"`
-	MaxTokens     *int                  `json:"max_tokens,omitempty"`
-	System        []contentBlock        `json:"system,omitempty"`
-	Messages      []anthropicMessage    `json:"messages"`
-	Tools         []anthropicTool       `json:"tools,omitempty"`
-	ToolChoice    *anthropicToolChoice  `json:"tool_choice,omitempty"`
-	Temperature   *float64              `json:"temperature,omitempty"`
-	TopP          *float64              `json:"top_p,omitempty"`
-	TopK          *int                  `json:"top_k,omitempty"`
-	StopSequences []string              `json:"stop_sequences,omitempty"`
-	Stream        bool                  `json:"stream,omitempty"`
-	Thinking      *anthropicThinking    `json:"thinking,omitempty"`
+	Model         string               `json:"model"`
+	MaxTokens     *int                 `json:"max_tokens,omitempty"`
+	System        []contentBlock       `json:"system,omitempty"`
+	Messages      []anthropicMessage   `json:"messages"`
+	Tools         []anthropicTool      `json:"tools,omitempty"`
+	ToolChoice    *anthropicToolChoice `json:"tool_choice,omitempty"`
+	Temperature   *float64             `json:"temperature,omitempty"`
+	TopP          *float64             `json:"top_p,omitempty"`
+	TopK          *int                 `json:"top_k,omitempty"`
+	StopSequences []string             `json:"stop_sequences,omitempty"`
+	Stream        bool                 `json:"stream,omitempty"`
+	Thinking      *anthropicThinking   `json:"thinking,omitempty"`
 }
 
 type anthropicThinking struct {
@@ -25,6 +25,14 @@ type anthropicThinking struct {
 type anthropicMessage struct {
 	Role    string         `json:"role"`
 	Content []contentBlock `json:"content"`
+}
+
+// cacheControl maps to Anthropic's cache_control object.
+// Type is always "ephemeral". TTL is optional: "" means 5-minute cache
+// (Anthropic default), "1h" means 1-hour cache (billed at a higher rate).
+type cacheControl struct {
+	Type string `json:"type"`
+	TTL  string `json:"ttl,omitempty"`
 }
 
 type contentBlock struct {
@@ -49,6 +57,9 @@ type contentBlock struct {
 	ToolUseID string `json:"tool_use_id,omitempty"`
 	Content   any    `json:"content,omitempty"`
 	IsError   bool   `json:"is_error,omitempty"`
+
+	// prompt caching
+	CacheControl *cacheControl `json:"cache_control,omitempty"`
 }
 
 type imageSource struct {
@@ -59,28 +70,29 @@ type imageSource struct {
 }
 
 type anthropicTool struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	InputSchema any    `json:"input_schema"`
+	Name         string        `json:"name"`
+	Description  string        `json:"description,omitempty"`
+	InputSchema  any           `json:"input_schema"`
+	CacheControl *cacheControl `json:"cache_control,omitempty"`
 }
 
 type anthropicToolChoice struct {
-	Type                  string `json:"type"`
-	Name                  string `json:"name,omitempty"`
-	DisableParallelToolUse *bool `json:"disable_parallel_tool_use,omitempty"`
+	Type                   string `json:"type"`
+	Name                   string `json:"name,omitempty"`
+	DisableParallelToolUse *bool  `json:"disable_parallel_tool_use,omitempty"`
 }
 
 // --- Response types ---
 
 type messagesResponse struct {
-	ID           string               `json:"id"`
-	Type         string               `json:"type"`
-	Model        string               `json:"model"`
-	Role         string               `json:"role"`
-	Content      []responseBlock      `json:"content"`
-	StopReason   string               `json:"stop_reason"`
-	StopSequence string               `json:"stop_sequence"`
-	Usage        messagesUsage        `json:"usage"`
+	ID           string        `json:"id"`
+	Type         string        `json:"type"`
+	Model        string        `json:"model"`
+	Role         string        `json:"role"`
+	Content      []responseBlock `json:"content"`
+	StopReason   string        `json:"stop_reason"`
+	StopSequence string        `json:"stop_sequence"`
+	Usage        messagesUsage `json:"usage"`
 }
 
 type responseBlock struct {
@@ -102,11 +114,19 @@ type responseBlock struct {
 	Input any    `json:"input,omitempty"`
 }
 
+// cacheCreationDetail holds the per-TTL breakdown of cache-write tokens.
+// Populated by Anthropic when at least one cache_control block is present.
+type cacheCreationDetail struct {
+	Ephemeral5mInputTokens int `json:"ephemeral_5m_input_tokens,omitempty"`
+	Ephemeral1hInputTokens int `json:"ephemeral_1h_input_tokens,omitempty"`
+}
+
 type messagesUsage struct {
-	InputTokens              int `json:"input_tokens"`
-	OutputTokens             int `json:"output_tokens"`
-	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
-	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
+	InputTokens              int                  `json:"input_tokens"`
+	OutputTokens             int                  `json:"output_tokens"`
+	CacheCreationInputTokens int                  `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens     int                  `json:"cache_read_input_tokens,omitempty"`
+	CacheCreation            *cacheCreationDetail `json:"cache_creation,omitempty"`
 }
 
 // --- Streaming event types ---

@@ -264,11 +264,15 @@ func resolveMaxTokens(params *sdk.GenerateParams, thinking *ThinkingConfig) *int
 func convertTools(tools []sdk.Tool) []anthropicTool {
 	out := make([]anthropicTool, 0, len(tools))
 	for _, t := range tools {
-		out = append(out, anthropicTool{
+		at := anthropicTool{
 			Name:        t.Name,
 			Description: t.Description,
 			InputSchema: t.Parameters,
-		})
+		}
+		if t.CacheControl != nil {
+			at.CacheControl = &cacheControl{Type: t.CacheControl.Type, TTL: t.CacheControl.TTL}
+		}
+		out = append(out, at)
 	}
 	return out
 }
@@ -307,6 +311,11 @@ func convertToolChoice(choice any) *anthropicToolChoice {
 // convertMessages splits SDK messages into Anthropic's system blocks and
 // alternating user/assistant messages. Tool result messages are merged into
 // user messages, as required by the Anthropic API.
+//
+// Note: GenerateParams.System (plain string) is converted to a single system
+// block without cache_control. To attach cache_control to a system prompt,
+// pass it as a MessageRoleSystem message with a TextPart that has CacheControl
+// set instead of using the System field.
 func convertMessages(params *sdk.GenerateParams) ([]contentBlock, []anthropicMessage) {
 	var system []contentBlock
 	var out []anthropicMessage
@@ -320,7 +329,11 @@ func convertMessages(params *sdk.GenerateParams) ([]contentBlock, []anthropicMes
 		case sdk.MessageRoleSystem:
 			for _, part := range msg.Content {
 				if tp, ok := part.(sdk.TextPart); ok {
-					system = append(system, contentBlock{Type: blockTypeText, Text: tp.Text})
+					block := contentBlock{Type: blockTypeText, Text: tp.Text}
+					if tp.CacheControl != nil {
+						block.CacheControl = &cacheControl{Type: tp.CacheControl.Type, TTL: tp.CacheControl.TTL}
+					}
+					system = append(system, block)
 				}
 			}
 
@@ -358,11 +371,19 @@ func convertUserContent(parts []sdk.MessagePart) []contentBlock {
 	for _, part := range parts {
 		switch p := part.(type) {
 		case sdk.TextPart:
-			blocks = append(blocks, contentBlock{Type: blockTypeText, Text: p.Text})
+			block := contentBlock{Type: blockTypeText, Text: p.Text}
+			if p.CacheControl != nil {
+				block.CacheControl = &cacheControl{Type: p.CacheControl.Type, TTL: p.CacheControl.TTL}
+			}
+			blocks = append(blocks, block)
 		case sdk.ImagePart:
 			blocks = append(blocks, convertImagePart(p))
 		case sdk.FilePart:
-			blocks = append(blocks, contentBlock{Type: blockTypeText, Text: p.Data})
+			block := contentBlock{Type: blockTypeText, Text: p.Data}
+			if p.CacheControl != nil {
+				block.CacheControl = &cacheControl{Type: p.CacheControl.Type, TTL: p.CacheControl.TTL}
+			}
+			blocks = append(blocks, block)
 		}
 	}
 	return blocks
@@ -376,6 +397,11 @@ func convertImagePart(p sdk.ImagePart) contentBlock {
 	image := strings.TrimSpace(p.Image)
 	mediaType := strings.TrimSpace(p.MediaType)
 
+	var cc *cacheControl
+	if p.CacheControl != nil {
+		cc = &cacheControl{Type: p.CacheControl.Type, TTL: p.CacheControl.TTL}
+	}
+
 	if strings.HasPrefix(strings.ToLower(image), "http://") || strings.HasPrefix(strings.ToLower(image), "https://") {
 		return contentBlock{
 			Type: "image",
@@ -384,6 +410,7 @@ func convertImagePart(p sdk.ImagePart) contentBlock {
 				MediaType: mediaType,
 				URL:       image,
 			},
+			CacheControl: cc,
 		}
 	}
 
@@ -413,6 +440,7 @@ func convertImagePart(p sdk.ImagePart) contentBlock {
 			MediaType: mediaType,
 			Data:      image,
 		},
+		CacheControl: cc,
 	}
 }
 
@@ -771,15 +799,20 @@ func generateID() string {
 
 func convertUsage(u *messagesUsage) sdk.Usage {
 	total := u.InputTokens + u.OutputTokens
+	detail := sdk.InputTokenDetail{
+		CacheReadTokens:  u.CacheReadInputTokens,
+		CacheWriteTokens: u.CacheCreationInputTokens,
+	}
+	if u.CacheCreation != nil {
+		detail.CacheWrite5mTokens = u.CacheCreation.Ephemeral5mInputTokens
+		detail.CacheWrite1hTokens = u.CacheCreation.Ephemeral1hInputTokens
+	}
 	return sdk.Usage{
 		InputTokens:       u.InputTokens,
 		OutputTokens:      u.OutputTokens,
 		TotalTokens:       total,
 		CachedInputTokens: u.CacheReadInputTokens,
-		InputTokenDetails: sdk.InputTokenDetail{
-			CacheReadTokens:  u.CacheReadInputTokens,
-			CacheWriteTokens: u.CacheCreationInputTokens,
-		},
+		InputTokenDetails: detail,
 	}
 }
 
