@@ -972,7 +972,7 @@ func integrationModel(t *testing.T) *sdk.Model {
 	t.Helper()
 	m := os.Getenv("GOOGLE_GENERATIVE_AI_MODEL")
 	if m == "" {
-		m = "gemini-2.0-flash"
+		m = "gemini-2.5-flash"
 	}
 	return &sdk.Model{ID: m}
 }
