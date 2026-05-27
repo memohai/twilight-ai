@@ -456,6 +456,7 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 		}
 
 		sp.flush()
+		sp.emitFinishStep()
 
 		sp.send(&sdk.FinishPart{
 			FinishReason:    sp.finishReason,
