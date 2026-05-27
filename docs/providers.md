@@ -100,6 +100,7 @@ model := provider.ChatModel("gpt-4o-mini")
 | `WithBedrockCredentials(region, accessKeyID, secretAccessKey, sessionToken)` | disabled | Use AWS SigV4 with static AWS credentials for Bedrock |
 | `WithBaseURL(url)` | `https://api.openai.com/v1` | Base URL for API requests |
 | `WithHTTPClient(client)` | `&http.Client{}` | Custom HTTP client (for proxies, timeouts, etc.) |
+| `WithDeepSeekChatCompletionsCompat()` | disabled | Map `WithReasoningEffort("none")` to DeepSeek's thinking disable toggle |
 
 ### API Endpoints for Discovery
 
@@ -111,15 +112,35 @@ model := provider.ChatModel("gpt-4o-mini")
 
 ### OpenAI-Compatible Providers
 
-Any service that implements the OpenAI Chat Completions API works out of the box:
+Any service that implements the OpenAI Chat Completions API works out of the box.
+DeepSeek uses the same endpoint, but disables thinking with a `thinking` toggle
+instead of `reasoning_effort: "none"`, so enable the DeepSeek compatibility
+option when you need that behavior:
 
 ```go
 // DeepSeek
 provider := completions.New(
     completions.WithAPIKey("your-deepseek-key"),
     completions.WithBaseURL("https://api.deepseek.com"),
+    completions.WithDeepSeekChatCompletionsCompat(),
 )
+```
 
+The compatibility option keeps the generic Chat Completions provider and only
+adapts DeepSeek's thinking toggle:
+
+| SDK option/value | DeepSeek request |
+|------------------|------------------|
+| `WithReasoningEffort("none")` | `thinking: {type: "disabled"}` |
+| any other `WithReasoningEffort(...)` value | original `reasoning_effort` |
+
+Note: `"none"` is the effort floor, which for DeepSeek means off. Sending
+`reasoning_effort: "none"` alone does not stop it thinking, so the provider sends
+`thinking: {type: "disabled"}` instead.
+
+Other OpenAI-compatible services use `completions.New()` with a base URL:
+
+```go
 // Groq
 provider := completions.New(
     completions.WithAPIKey("your-groq-key"),
@@ -186,9 +207,9 @@ The `provider/openai/responses` package provides an implementation for the OpenA
 | **Reasoning models** | Basic support (`reasoning_content` field) | First-class (`reasoning` output items with summaries) |
 | **Citations** | Not supported | URL citations via annotations |
 | **Input format** | Nested `messages` array | Flat `input` array |
-| **Compatibility** | Broad (DeepSeek, Groq, Ollama, etc.) | OpenAI and OpenRouter |
+| **Compatibility** | Broad (DeepSeek, Groq, Ollama, Azure-style compatible endpoints, etc.) | OpenAI and OpenRouter |
 
-Use **Completions** when you need broad compatibility with OpenAI-compatible endpoints. Use **Responses** when you want native reasoning model support (o3, o4-mini) or URL citation annotations.
+Use **Completions** when you need broad compatibility with OpenAI-compatible endpoints. Add `WithDeepSeekChatCompletionsCompat()` when `WithReasoningEffort("none")` should disable DeepSeek thinking. Use **Responses** when you want native reasoning model support (o3, o4-mini) or URL citation annotations.
 
 ### Basic Usage
 

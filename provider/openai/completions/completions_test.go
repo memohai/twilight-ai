@@ -751,6 +751,98 @@ func TestDoGenerate_ReasoningFallback(t *testing.T) {
 	}
 }
 
+func TestDoGenerate_DeepSeekCompatDisablesThinking(t *testing.T) {
+	var body struct {
+		ReasoningEffort *string `json:"reasoning_effort"`
+		Thinking        *struct {
+			Type string `json:"type"`
+		} `json:"thinking"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id":    "chatcmpl-deepseek",
+			"model": "deepseek-v4-flash",
+			"choices": []map[string]any{{
+				"index":         0,
+				"finish_reason": "stop",
+				"message":       map[string]any{"role": "assistant", "content": "ok"},
+			}},
+			"usage": map[string]any{"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+		})
+	}))
+	defer srv.Close()
+
+	p := completions.New(
+		completions.WithAPIKey("k"),
+		completions.WithBaseURL(srv.URL),
+		completions.WithDeepSeekChatCompletionsCompat(),
+	)
+	_, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model:           &sdk.Model{ID: "deepseek-v4-flash"},
+		Messages:        []sdk.Message{sdk.UserMessage("hi")},
+		ReasoningEffort: stringPtr("none"),
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate: %v", err)
+	}
+	if body.ReasoningEffort != nil {
+		t.Fatalf("reasoning_effort should be omitted, got %q", *body.ReasoningEffort)
+	}
+	if body.Thinking == nil || body.Thinking.Type != "disabled" {
+		t.Fatalf("thinking: got %#v, want disabled", body.Thinking)
+	}
+}
+
+func TestDoGenerate_DeepSeekCompatLeavesOtherReasoningEffortAlone(t *testing.T) {
+	var body struct {
+		ReasoningEffort *string `json:"reasoning_effort"`
+		Thinking        *struct {
+			Type string `json:"type"`
+		} `json:"thinking"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id":    "chatcmpl-deepseek",
+			"model": "deepseek-v4-pro",
+			"choices": []map[string]any{{
+				"index":         0,
+				"finish_reason": "stop",
+				"message":       map[string]any{"role": "assistant", "content": "ok"},
+			}},
+			"usage": map[string]any{"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+		})
+	}))
+	defer srv.Close()
+
+	p := completions.New(
+		completions.WithAPIKey("k"),
+		completions.WithBaseURL(srv.URL),
+		completions.WithDeepSeekChatCompletionsCompat(),
+	)
+	_, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model:           &sdk.Model{ID: "deepseek-v4-pro"},
+		Messages:        []sdk.Message{sdk.UserMessage("hi")},
+		ReasoningEffort: stringPtr("xhigh"),
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate: %v", err)
+	}
+	if body.ReasoningEffort == nil || *body.ReasoningEffort != "xhigh" {
+		t.Fatalf("reasoning_effort: got %v, want xhigh", body.ReasoningEffort)
+	}
+	if body.Thinking != nil {
+		t.Fatalf("thinking should be omitted, got %#v", body.Thinking)
+	}
+}
+
 func TestDoStream_ReasoningFallback(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -1378,6 +1470,8 @@ func TestTestModel_NotSupported(t *testing.T) {
 		t.Error("expected model to not be supported")
 	}
 }
+
+func stringPtr(s string) *string { return &s }
 
 func TestMain(m *testing.M) {
 	testutil.LoadEnv()

@@ -730,6 +730,7 @@ type Option func(*Provider)
 func WithAPIKey(apiKey string) Option
 func WithBaseURL(baseURL string) Option
 func WithHTTPClient(client *http.Client) Option
+func WithDeepSeekChatCompletionsCompat() Option
 func New(options ...Option) *Provider
 
 func (p *Provider) Name() string
@@ -745,6 +746,7 @@ Default option values:
 
 - `WithBaseURL`: `https://api.openai.com/v1`
 - `WithHTTPClient`: `&http.Client{}`
+- `WithDeepSeekChatCompletionsCompat`: disabled. When enabled, `WithReasoningEffort("none")` sends `thinking:{type:"disabled"}` and omits `reasoning_effort`.
 
 Discovery endpoints:
 
