@@ -478,11 +478,18 @@ func convertAssistantMessage(msg sdk.Message) anthropicMessage {
 			if id == "" {
 				id = generateID()
 			}
+			// The API requires tool_use blocks to always carry an input object.
+			// A no-argument tool call arrives with a nil Input, which the
+			// omitempty tag would drop entirely, so default it to an empty object.
+			input := p.Input
+			if input == nil {
+				input = map[string]any{}
+			}
 			blocks = append(blocks, contentBlock{
 				Type:  blockTypeToolUse,
 				ID:    id,
 				Name:  p.ToolName,
-				Input: p.Input,
+				Input: input,
 			})
 		}
 	}

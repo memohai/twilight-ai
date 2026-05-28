@@ -408,6 +408,70 @@ func TestDoGenerate_ToolCallMultiTurn(t *testing.T) {
 	}
 }
 
+func TestDoGenerate_ToolCallEmptyInput(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Messages []json.RawMessage `json:"messages"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+
+		var assistantMsg struct {
+			Content []map[string]json.RawMessage `json:"content"`
+		}
+		json.Unmarshal(body.Messages[1], &assistantMsg)
+		if len(assistantMsg.Content) != 1 {
+			t.Fatalf("expected 1 content block, got %d", len(assistantMsg.Content))
+		}
+		input, ok := assistantMsg.Content[0]["input"]
+		if !ok {
+			t.Fatalf("tool_use block is missing required input field: %v", assistantMsg.Content[0])
+		}
+		if string(input) != "{}" {
+			t.Errorf("input: got %s, want {}", input)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id": "msg_2", "type": "message", "model": "claude-sonnet-4-20250514", "role": "assistant",
+			"content":     []map[string]any{{"type": "text", "text": "done"}},
+			"stop_reason": "end_turn",
+			"usage":       map[string]any{"input_tokens": 10, "output_tokens": 2},
+		})
+	}))
+	defer srv.Close()
+
+	p := messages.New(messages.WithAPIKey("test-key"), messages.WithBaseURL(srv.URL))
+
+	_, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model: &sdk.Model{ID: "claude-sonnet-4-20250514"},
+		Messages: []sdk.Message{
+			{
+				Role:    sdk.MessageRoleUser,
+				Content: []sdk.MessagePart{sdk.TextPart{Text: "List schedules"}},
+			},
+			{
+				Role: sdk.MessageRoleAssistant,
+				Content: []sdk.MessagePart{sdk.ToolCallPart{
+					ToolCallID: "toolu_empty",
+					ToolName:   "list_schedule",
+					Input:      nil,
+				}},
+			},
+			{
+				Role: sdk.MessageRoleTool,
+				Content: []sdk.MessagePart{sdk.ToolResultPart{
+					ToolCallID: "toolu_empty",
+					ToolName:   "list_schedule",
+					Result:     map[string]any{"count": 0},
+				}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate: %v", err)
+	}
+}
+
 func TestDoGenerate_Thinking(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
