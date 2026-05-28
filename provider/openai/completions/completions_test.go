@@ -199,6 +199,104 @@ func TestDoStream(t *testing.T) {
 	}
 }
 
+// TestDoStream_UsageInTrailingChunk guards against a regression where the
+// OpenAI Chat Completions streaming protocol delivers the `usage` block in a
+// SEPARATE chunk AFTER the chunk carrying `finish_reason` (with `choices: []`),
+// as permitted by the official spec and emitted by llama.cpp's server
+// implementation when stream_options.include_usage is enabled.
+//
+// The previous streamProcessor emitted FinishStepPart synchronously inside
+// processFinishReason, capturing sp.usage at that moment. Because the trailing
+// usage chunk arrives later, FinishStepPart.Usage ended up empty. The fix
+// defers FinishStepPart until the stream completes.
+//
+// See: https://github.com/memohai/twilight-ai/issues/7
+func TestDoStream_UsageInTrailingChunk(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			t.Fatal("server does not support flushing")
+		}
+
+		// Mimic llama.cpp / OpenAI spec when include_usage=true:
+		// 1) content chunk
+		// 2) chunk with finish_reason and NO usage
+		// 3) trailing chunk with choices:[] and the usage payload
+		chunks := []string{
+			`{"id":"chunk-1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"},"finish_reason":null}]}`,
+			`{"id":"chunk-1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+			`{"id":"chunk-1","object":"chat.completion.chunk","choices":[],"usage":{"prompt_tokens":5,"completion_tokens":1,"total_tokens":6}}`,
+		}
+		for _, c := range chunks {
+			fmt.Fprintf(w, "data: %s\n\n", c)
+			flusher.Flush()
+		}
+		fmt.Fprintf(w, "data: [DONE]\n\n")
+		flusher.Flush()
+	}))
+	defer srv.Close()
+
+	p := completions.New(
+		completions.WithAPIKey("test-key"),
+		completions.WithBaseURL(srv.URL),
+	)
+
+	sr, err := p.DoStream(context.Background(), sdk.GenerateParams{
+		Model: &sdk.Model{ID: "gpt-4o-mini"},
+		Messages: []sdk.Message{{
+			Role:    sdk.MessageRoleUser,
+			Content: []sdk.MessagePart{sdk.TextPart{Text: "Hi"}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("DoStream failed: %v", err)
+	}
+
+	var (
+		finishStep *sdk.FinishStepPart
+		finishAll  *sdk.FinishPart
+	)
+	for part := range sr.Stream {
+		switch p := part.(type) {
+		case *sdk.FinishStepPart:
+			finishStep = p
+		case *sdk.FinishPart:
+			finishAll = p
+		case *sdk.ErrorPart:
+			t.Fatalf("unexpected error part: %v", p.Error)
+		}
+	}
+
+	if finishStep == nil {
+		t.Fatal("missing FinishStepPart")
+	}
+	if finishAll == nil {
+		t.Fatal("missing FinishPart")
+	}
+
+	// Both the per-step usage and the total usage must reflect the trailing
+	// usage chunk. The pre-fix implementation left FinishStepPart.Usage empty
+	// because it was sent before the trailing chunk was processed.
+	if finishStep.Usage.InputTokens != 5 {
+		t.Errorf("FinishStepPart.Usage.InputTokens: got %d, want 5", finishStep.Usage.InputTokens)
+	}
+	if finishStep.Usage.OutputTokens != 1 {
+		t.Errorf("FinishStepPart.Usage.OutputTokens: got %d, want 1", finishStep.Usage.OutputTokens)
+	}
+	if finishStep.Usage.TotalTokens != 6 {
+		t.Errorf("FinishStepPart.Usage.TotalTokens: got %d, want 6", finishStep.Usage.TotalTokens)
+	}
+
+	// FinishPart.TotalUsage already works today because DoStream sends it
+	// after the SSE loop finishes — but assert it explicitly so a regression
+	// either way is caught.
+	if finishAll.TotalUsage.InputTokens != 5 {
+		t.Errorf("FinishPart.TotalUsage.InputTokens: got %d, want 5", finishAll.TotalUsage.InputTokens)
+	}
+}
+
 func TestDoGenerate_WithImage(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {

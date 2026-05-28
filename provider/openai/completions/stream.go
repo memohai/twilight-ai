@@ -21,6 +21,7 @@ type streamProcessor struct {
 	chunkModel         string
 	chunkCreated       int64
 	flushed            bool
+	finishStepPending  bool
 	pendingToolCalls   map[int]*streamingToolCall
 }
 
@@ -187,6 +188,24 @@ func (sp *streamProcessor) processFinishReason(choice *chatChunkChoice) {
 	sp.finishReason = mapFinishReason(sp.rawFinishReason)
 
 	sp.flush()
+
+	// Defer FinishStepPart until the stream completes. The OpenAI Chat
+	// Completions spec (and llama.cpp's server) may deliver the `usage` block
+	// in a trailing chunk with `choices: []` that arrives AFTER this
+	// finish_reason chunk. Emitting FinishStepPart here would capture an empty
+	// sp.usage. emitFinishStep is called once the SSE loop has consumed every
+	// chunk, so sp.usage is complete by then.
+	sp.finishStepPending = true
+}
+
+// emitFinishStep sends the deferred FinishStepPart. It is a no-op unless a
+// finish_reason was observed, preserving the previous behaviour of only
+// emitting a step boundary for streams that actually finish.
+func (sp *streamProcessor) emitFinishStep() {
+	if !sp.finishStepPending {
+		return
+	}
+	sp.finishStepPending = false
 
 	sp.send(&sdk.FinishStepPart{
 		FinishReason:    sp.finishReason,
