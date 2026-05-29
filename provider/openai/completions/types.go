@@ -16,8 +16,13 @@ type chatRequest struct {
 	PresencePenalty     *float64           `json:"presence_penalty,omitempty"`
 	Seed                *int               `json:"seed,omitempty"`
 	ReasoningEffort     *string            `json:"reasoning_effort,omitempty"`
+	Thinking            *chatThinking      `json:"thinking,omitempty"`
 	Stream              bool               `json:"stream,omitempty"`
 	StreamOptions       *chatStreamOptions `json:"stream_options,omitempty"`
+}
+
+type chatThinking struct {
+	Type string `json:"type"`
 }
 
 type chatStreamOptions struct {
@@ -81,13 +86,13 @@ type chatChoice struct {
 }
 
 type chatRespMessage struct {
-	Role             string           `json:"role"`
-	Content          string           `json:"content"`
-	ReasoningContent string           `json:"reasoning_content,omitempty"`
-	Reasoning        string           `json:"reasoning,omitempty"`
-	Refusal          string           `json:"refusal,omitempty"`
-	ToolCalls        []chatToolCall   `json:"tool_calls,omitempty"`
-	Images           []chatImagePart  `json:"images,omitempty"`
+	Role             string          `json:"role"`
+	Content          string          `json:"content"`
+	ReasoningContent string          `json:"reasoning_content,omitempty"`
+	Reasoning        string          `json:"reasoning,omitempty"`
+	Refusal          string          `json:"refusal,omitempty"`
+	ToolCalls        []chatToolCall  `json:"tool_calls,omitempty"`
+	Images           []chatImagePart `json:"images,omitempty"`
 }
 
 type chatToolCall struct {

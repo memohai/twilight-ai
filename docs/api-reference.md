@@ -1216,7 +1216,12 @@ type Option func(*Provider)
 func WithAPIKey(apiKey string) Option
 func WithBaseURL(baseURL string) Option
 func WithHTTPClient(client *http.Client) Option
+func WithDeepSeekChatCompletionsCompat() Option
 ```
+
+`WithDeepSeekChatCompletionsCompat` keeps the generic `/chat/completions`
+transport while adapting DeepSeek's thinking toggle: `WithReasoningEffort("none")`
+sends `thinking: {type: "disabled"}` and omits `reasoning_effort`.
 
 #### Methods
 

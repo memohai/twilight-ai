@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/memohai/twilight-ai/internal/utils"
@@ -19,9 +20,14 @@ type Provider struct {
 	baseURL        string
 	httpClient     *http.Client
 	prepareRequest func(*http.Request) error
+	compat         chatCompletionsCompat
 }
 
 type Option func(*Provider)
+
+type chatCompletionsCompat string
+
+const chatCompletionsCompatDeepSeek chatCompletionsCompat = "deepseek"
 
 func WithAPIKey(apiKey string) Option {
 	return func(p *Provider) {
@@ -54,6 +60,14 @@ func WithBaseURL(baseURL string) Option {
 func WithHTTPClient(client *http.Client) Option {
 	return func(p *Provider) {
 		p.httpClient = client
+	}
+}
+
+// WithDeepSeekChatCompletionsCompat maps reasoning_effort "none" to DeepSeek's
+// thinking disable toggle while keeping the generic Chat Completions provider.
+func WithDeepSeekChatCompletionsCompat() Option {
+	return func(p *Provider) {
+		p.compat = chatCompletionsCompatDeepSeek
 	}
 }
 
@@ -210,7 +224,26 @@ func (p *Provider) buildRequest(params *sdk.GenerateParams) *chatRequest {
 			JSONSchema: params.ResponseFormat.JSONSchema,
 		}
 	}
+	p.applyChatCompletionsCompat(req)
 	return req
+}
+
+func (p *Provider) applyChatCompletionsCompat(req *chatRequest) {
+	if p.compat != chatCompletionsCompatDeepSeek {
+		return
+	}
+	if req.ReasoningEffort == nil {
+		return
+	}
+	effort := strings.TrimSpace(*req.ReasoningEffort)
+	if effort == "" {
+		return
+	}
+	switch strings.ToLower(effort) {
+	case "none", "disable", "disabled":
+		req.ReasoningEffort = nil
+		req.Thinking = &chatThinking{Type: "disabled"}
+	}
 }
 
 func convertTools(tools []sdk.Tool) []chatTool {
