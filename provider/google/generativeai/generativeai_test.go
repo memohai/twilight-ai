@@ -1106,6 +1106,49 @@ func TestListModels(t *testing.T) {
 	if models[0].DisplayName != "Gemini 2.5 Pro" {
 		t.Errorf("expected display name 'Gemini 2.5 Pro', got %q", models[0].DisplayName)
 	}
+	if models[0].Type != sdk.ModelTypeChat {
+		t.Errorf("expected chat type for model without supportedGenerationMethods, got %q", models[0].Type)
+	}
+}
+
+func TestListModels_EmbeddingType(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"models": []map[string]any{
+				{
+					"name":                       "models/gemini-2.5-flash",
+					"displayName":                "Gemini 2.5 Flash",
+					"supportedGenerationMethods": []string{"generateContent", "countTokens"},
+				},
+				{
+					"name":                       "models/gemini-embedding-001",
+					"displayName":                "Gemini Embedding 001",
+					"supportedGenerationMethods": []string{"embedContent", "countTokens"},
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	p := generativeai.New(
+		generativeai.WithAPIKey("test-key"),
+		generativeai.WithBaseURL(srv.URL),
+	)
+
+	models, err := p.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("ListModels failed: %v", err)
+	}
+	if len(models) != 2 {
+		t.Fatalf("expected 2 models, got %d", len(models))
+	}
+	if models[0].Type != sdk.ModelTypeChat {
+		t.Errorf("expected chat type for generateContent model, got %q", models[0].Type)
+	}
+	if models[1].Type != sdk.ModelTypeEmbedding {
+		t.Errorf("expected embedding type for embedContent model, got %q", models[1].Type)
+	}
 }
 
 func TestProviderTest_OK(t *testing.T) {

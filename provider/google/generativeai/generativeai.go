@@ -74,7 +74,7 @@ func (p *Provider) ListModels(ctx context.Context) ([]sdk.Model, error) {
 			ID:          id,
 			DisplayName: m.DisplayName,
 			Provider:    p,
-			Type:        sdk.ModelTypeChat,
+			Type:        googleModelType(m.SupportedGenerationMethods),
 		})
 	}
 	return models, nil
@@ -132,6 +132,23 @@ func (p *Provider) ChatModel(id string) *sdk.Model {
 		Provider: p,
 		Type:     sdk.ModelTypeChat,
 	}
+}
+
+func googleModelType(methods []string) sdk.ModelType {
+	hasGenerate := false
+	hasEmbed := false
+	for _, m := range methods {
+		switch m {
+		case "generateContent":
+			hasGenerate = true
+		case "embedContent":
+			hasEmbed = true
+		}
+	}
+	if hasEmbed && !hasGenerate {
+		return sdk.ModelTypeEmbedding
+	}
+	return sdk.ModelTypeChat
 }
 
 // ---------- DoGenerate ----------
