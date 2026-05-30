@@ -111,7 +111,8 @@ type Model struct {
 }
 
 type ModelType string
-const ModelTypeChat ModelType = "chat"
+const ModelTypeChat      ModelType = "chat"
+const ModelTypeEmbedding ModelType = "embedding"
 ```
 
 #### Methods

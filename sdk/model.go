@@ -5,7 +5,8 @@ import "context"
 type ModelType string
 
 const (
-	ModelTypeChat ModelType = "chat"
+	ModelTypeChat      ModelType = "chat"
+	ModelTypeEmbedding ModelType = "embedding"
 )
 
 type Model struct {
