@@ -79,7 +79,8 @@ type ModelTestResult struct {
 ```go
 type ModelType string
 
-const ModelTypeChat ModelType = "chat"
+const ModelTypeChat      ModelType = "chat"
+const ModelTypeEmbedding ModelType = "embedding"
 
 type Model struct {
     ID          string
