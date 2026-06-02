@@ -179,6 +179,106 @@ func TestDoGenerate_DefaultMaxTokens_ThinkingBudgetReserveAnswerBudget(t *testin
 	}
 }
 
+func TestDoGenerate_ReasoningEffort_OutputConfig(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			MaxTokens int `json:"max_tokens"`
+			Thinking  *struct {
+				Type string `json:"type"`
+			} `json:"thinking"`
+			OutputConfig *struct {
+				Effort string `json:"effort"`
+			} `json:"output_config"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if body.OutputConfig == nil || body.OutputConfig.Effort != "high" {
+			t.Fatalf("output_config.effort: got %+v, want high", body.OutputConfig)
+		}
+		if body.Thinking != nil {
+			t.Fatalf("thinking should be absent without WithThinking, got %+v", body.Thinking)
+		}
+		if body.MaxTokens != 32000 {
+			t.Fatalf("max_tokens: got %d, want 32000 (reasoning default)", body.MaxTokens)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id": "msg_effort", "type": "message", "model": "claude-opus-4-8", "role": "assistant",
+			"content":     []map[string]any{{"type": "text", "text": "OK"}},
+			"stop_reason": "end_turn",
+			"usage":       map[string]any{"input_tokens": 5, "output_tokens": 2},
+		})
+	}))
+	defer srv.Close()
+
+	p := messages.New(messages.WithAPIKey("test-key"), messages.WithBaseURL(srv.URL))
+	effort := "high"
+	result, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model:           &sdk.Model{ID: "claude-opus-4-8"},
+		Messages:        []sdk.Message{sdk.UserMessage("Hi")},
+		ReasoningEffort: &effort,
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate failed: %v", err)
+	}
+	if result.Text != "OK" {
+		t.Errorf("text: got %q", result.Text)
+	}
+}
+
+func TestDoGenerate_AdaptiveThinking_EffortNoBudget(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			MaxTokens int `json:"max_tokens"`
+			Thinking  struct {
+				Type         string `json:"type"`
+				BudgetTokens int    `json:"budget_tokens"`
+			} `json:"thinking"`
+			OutputConfig struct {
+				Effort string `json:"effort"`
+			} `json:"output_config"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if body.Thinking.Type != "adaptive" {
+			t.Fatalf("thinking.type: got %q, want adaptive", body.Thinking.Type)
+		}
+		if body.Thinking.BudgetTokens != 0 {
+			t.Fatalf("budget_tokens must be omitted for adaptive, got %d", body.Thinking.BudgetTokens)
+		}
+		if body.OutputConfig.Effort != "xhigh" {
+			t.Fatalf("output_config.effort: got %q, want xhigh", body.OutputConfig.Effort)
+		}
+		if body.MaxTokens != 32000 {
+			t.Fatalf("max_tokens: got %d, want 32000 (reasoning default)", body.MaxTokens)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id": "msg_adaptive", "type": "message", "model": "claude-opus-4-8", "role": "assistant",
+			"content":     []map[string]any{{"type": "text", "text": "OK"}},
+			"stop_reason": "end_turn",
+			"usage":       map[string]any{"input_tokens": 5, "output_tokens": 2},
+		})
+	}))
+	defer srv.Close()
+
+	p := messages.New(
+		messages.WithAPIKey("test-key"),
+		messages.WithBaseURL(srv.URL),
+		messages.WithThinking(messages.ThinkingConfig{Type: "adaptive"}),
+	)
+	effort := "xhigh"
+	if _, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model:           &sdk.Model{ID: "claude-opus-4-8"},
+		Messages:        []sdk.Message{sdk.UserMessage("Hi")},
+		ReasoningEffort: &effort,
+	}); err != nil {
+		t.Fatalf("DoGenerate failed: %v", err)
+	}
+}
+
 func TestDoGenerate_SystemMessage(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
@@ -1068,7 +1168,7 @@ func TestDoGenerate_CacheControl_Tools(t *testing.T) {
 
 	p := messages.New(messages.WithAPIKey("k"), messages.WithBaseURL(srv.URL))
 	_, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
-		Model: &sdk.Model{ID: "claude-sonnet-4-20250514"},
+		Model:    &sdk.Model{ID: "claude-sonnet-4-20250514"},
 		Messages: []sdk.Message{sdk.UserMessage("Hi")},
 		Tools: []sdk.Tool{
 			{Name: "search", Description: "Search the web", Parameters: map[string]any{"type": "object"}},
@@ -1093,10 +1193,10 @@ func TestDoGenerate_CacheControl_DetailedUsage(t *testing.T) {
 			"content":     []map[string]any{{"type": "text", "text": "OK"}},
 			"stop_reason": "end_turn",
 			"usage": map[string]any{
-				"input_tokens":                  10,
-				"output_tokens":                 5,
-				"cache_creation_input_tokens":   556,
-				"cache_read_input_tokens":       200,
+				"input_tokens":                10,
+				"output_tokens":               5,
+				"cache_creation_input_tokens": 556,
+				"cache_read_input_tokens":     200,
 				"cache_creation": map[string]any{
 					"ephemeral_5m_input_tokens": 456,
 					"ephemeral_1h_input_tokens": 100,

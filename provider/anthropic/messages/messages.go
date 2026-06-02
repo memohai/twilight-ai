@@ -17,6 +17,11 @@ const (
 	defaultBaseURL      = "https://api.anthropic.com/v1"
 	defaultAnthropicVer = "2023-06-01"
 	defaultMaxTokens    = 4096
+	// defaultReasoningMaxTokens is the fallback output cap when reasoning is
+	// active without an explicit budget (adaptive / output_config.effort). The
+	// plain 4096 default would truncate reasoning + answer; modern Claude models
+	// support far larger outputs.
+	defaultReasoningMaxTokens = 32000
 
 	// Content block types for Anthropic API
 	blockTypeText     = "text"
@@ -245,6 +250,16 @@ func (p *Provider) buildRequest(params *sdk.GenerateParams) *messagesRequest {
 		}
 	}
 
+	// Reasoning effort is carried via output_config.effort. On modern Claude
+	// models (>= 4.6) this is the supported control; budget_tokens is deprecated
+	// (4.6) or rejected (4.7+). The caller is responsible for only sending an
+	// effort the target model accepts; errors surface as-is.
+	if params.ReasoningEffort != nil {
+		if effort := strings.TrimSpace(*params.ReasoningEffort); effort != "" {
+			req.OutputConfig = &anthropicOutputConfig{Effort: effort}
+		}
+	}
+
 	return req
 }
 
@@ -254,11 +269,31 @@ func resolveMaxTokens(params *sdk.GenerateParams, thinking *ThinkingConfig) *int
 	}
 
 	maxTokens := defaultMaxTokens
-	if thinking != nil && thinking.Type != "" && thinking.Type != "disabled" && thinking.BudgetTokens > 0 {
+	switch {
+	case thinking != nil && thinking.Type != "" && thinking.Type != "disabled" && thinking.BudgetTokens > 0:
+		// Explicit budget thinking: reserve room for the thinking budget on top
+		// of the answer budget.
 		maxTokens += thinking.BudgetTokens
+	case reasoningActive(params, thinking):
+		// Effort-based or adaptive thinking carries no explicit budget, but the
+		// model still needs generous headroom (reasoning + answer). The low 4096
+		// default would truncate; use a reasoning-aware default instead.
+		maxTokens = defaultReasoningMaxTokens
 	}
 
 	return &maxTokens
+}
+
+// reasoningActive reports whether the request enables reasoning without an
+// explicit token budget (adaptive thinking and/or output_config.effort).
+func reasoningActive(params *sdk.GenerateParams, thinking *ThinkingConfig) bool {
+	if thinking != nil && thinking.Type != "" && thinking.Type != "disabled" {
+		return true
+	}
+	if params.ReasoningEffort != nil && strings.TrimSpace(*params.ReasoningEffort) != "" {
+		return true
+	}
+	return false
 }
 
 func convertTools(tools []sdk.Tool) []anthropicTool {
