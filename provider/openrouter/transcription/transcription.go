@@ -111,15 +111,12 @@ func decodeOpenRouterModels(r io.Reader) ([]openRouterModel, error) {
 
 func isAudioInputModel(id string, inputs []string) bool {
 	for _, input := range inputs {
-		if strings.ToLower(input) == "audio" {
+		if strings.EqualFold(input, "audio") {
 			return true
 		}
 	}
 	lowerID := strings.ToLower(id)
-	if strings.Contains(lowerID, "transcribe") {
-		return true
-	}
-	return false
+	return strings.Contains(lowerID, "transcribe")
 }
 
 type audioConfig struct {
