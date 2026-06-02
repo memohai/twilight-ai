@@ -88,7 +88,7 @@ func (p *Provider) SpeechModel(id string) *sdk.SpeechModel {
 
 // ListModels returns the speech models exposed by this provider.
 func (p *Provider) ListModels(ctx context.Context) ([]*sdk.SpeechModel, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+"/models", http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+"/models?output_modalities=all", http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("openrouter speech: build list models request: %w", err)
 	}
@@ -104,15 +104,14 @@ func (p *Provider) ListModels(ctx context.Context) ([]*sdk.SpeechModel, error) {
 		return nil, fmt.Errorf("openrouter speech: unexpected status %d: %s", resp.StatusCode, string(body))
 	}
 
-	modelIDs, err := decodeOpenRouterModelIDs(resp.Body)
+	rawModels, err := decodeOpenRouterModels(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("openrouter speech: decode list models response: %w", err)
 	}
 
-	models := make([]*sdk.SpeechModel, 0, len(modelIDs))
-	for _, id := range modelIDs {
-		m := struct{ ID string }{ID: id}
-		if isOpenRouterSpeechModel(m.ID) {
+	models := make([]*sdk.SpeechModel, 0, len(rawModels))
+	for _, m := range rawModels {
+		if isOpenRouterSpeechModel(m.ID, m.Architecture.OutputModalities) {
 			models = append(models, p.SpeechModel(m.ID))
 		}
 	}
@@ -122,45 +121,43 @@ func (p *Provider) ListModels(ctx context.Context) ([]*sdk.SpeechModel, error) {
 	return models, nil
 }
 
-func isOpenRouterSpeechModel(id string) bool {
-	id = strings.ToLower(id)
-	return strings.Contains(id, "audio") || strings.Contains(id, "tts")
+func isOpenRouterSpeechModel(id string, outputs []string) bool {
+	for _, output := range outputs {
+		switch strings.ToLower(output) {
+		case "speech", "audio":
+			return true
+		}
+	}
+	lowerID := strings.ToLower(id)
+	return strings.Contains(lowerID, "tts") || strings.Contains(lowerID, "audio")
 }
 
-func decodeOpenRouterModelIDs(r io.Reader) ([]string, error) {
+type openRouterModel struct {
+	ID           string `json:"id"`
+	Architecture struct {
+		InputModalities  []string `json:"input_modalities"`
+		OutputModalities []string `json:"output_modalities"`
+	} `json:"architecture"`
+}
+
+func decodeOpenRouterModels(r io.Reader) ([]openRouterModel, error) {
 	body, err := io.ReadAll(r)
 	if err != nil {
 		return nil, err
 	}
 
 	var wrapped struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
+		Data []openRouterModel `json:"data"`
 	}
 	if err := json.Unmarshal(body, &wrapped); err == nil && len(wrapped.Data) > 0 {
-		out := make([]string, 0, len(wrapped.Data))
-		for _, m := range wrapped.Data {
-			if m.ID != "" {
-				out = append(out, m.ID)
-			}
-		}
-		return out, nil
+		return wrapped.Data, nil
 	}
 
-	var direct []struct {
-		ID string `json:"id"`
-	}
+	var direct []openRouterModel
 	if err := json.Unmarshal(body, &direct); err != nil {
 		return nil, err
 	}
-	out := make([]string, 0, len(direct))
-	for _, m := range direct {
-		if m.ID != "" {
-			out = append(out, m.ID)
-		}
-	}
-	return out, nil
+	return direct, nil
 }
 
 // DoSynthesize synthesizes speech and returns the complete WAV audio.

@@ -75,7 +75,7 @@ func (p *Provider) SpeechModel(id string) *sdk.SpeechModel {
 
 // ListModels returns the speech models exposed by this provider.
 func (p *Provider) ListModels(context.Context) ([]*sdk.SpeechModel, error) {
-	return nil, fmt.Errorf("minimax speech: provider does not expose a remote models discovery API in this SDK")
+	return nil, fmt.Errorf("minimax speech: list models unsupported: MiniMax /v1/models returns OpenAI-compatible LLM models, not TTS model discovery")
 }
 
 // t2aResponse is the JSON structure returned by the MiniMax /v1/t2a_v2 endpoint.

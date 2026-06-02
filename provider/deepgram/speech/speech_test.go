@@ -120,14 +120,47 @@ func TestProvider_SpeechModel(t *testing.T) {
 
 func TestProvider_ListModels(t *testing.T) {
 	t.Parallel()
-	p := New()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("method = %s, want GET", r.Method)
+		}
+		if r.URL.Path != "/v1/models" {
+			t.Errorf("path = %s, want /v1/models", r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Token key" {
+			t.Errorf("Authorization = %q", r.Header.Get("Authorization"))
+		}
+		_, _ = w.Write([]byte(`{"stt":[{"canonical_name":"nova-3"}],"tts":[{"canonical_name":"aura-2-asteria-en"},{"canonical_name":"aura-2-orpheus-en"},{"uuid":"not-a-model-id"}]}`))
+	}))
+	defer srv.Close()
 
+	p := New(WithAPIKey("key"), WithBaseURL(srv.URL))
+	models, err := p.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("ListModels: %v", err)
+	}
+	if len(models) != 2 {
+		t.Fatalf("len(models) = %d, want 2", len(models))
+	}
+	if models[0].ID != "aura-2-asteria-en" || models[1].ID != "aura-2-orpheus-en" {
+		t.Fatalf("unexpected models: %+v", models)
+	}
+}
+
+func TestProvider_ListModels_HTTPError(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	p := New(WithAPIKey("bad"), WithBaseURL(srv.URL))
 	models, err := p.ListModels(context.Background())
 	if err == nil {
-		t.Fatal("expected unsupported error")
+		t.Fatal("expected error for 401")
 	}
-	if len(models) != 0 {
-		t.Fatalf("len(models) = %d, want 0", len(models))
+	if models != nil {
+		t.Fatalf("models = %+v, want nil", models)
 	}
 }
 

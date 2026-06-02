@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -47,8 +48,47 @@ func (p *Provider) TranscriptionModel(id string) *sdk.TranscriptionModel {
 	return &sdk.TranscriptionModel{ID: id, Provider: p}
 }
 
-func (p *Provider) ListModels(context.Context) ([]*sdk.TranscriptionModel, error) {
-	return nil, fmt.Errorf("deepgram transcription: provider does not expose a remote models discovery API in this SDK")
+func (p *Provider) ListModels(ctx context.Context) ([]*sdk.TranscriptionModel, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+"/v1/models", http.NoBody)
+	if err != nil {
+		return nil, fmt.Errorf("deepgram transcription: build list models request: %w", err)
+	}
+	req.Header.Set("Authorization", "Token "+p.apiKey)
+
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("deepgram transcription: list models request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("deepgram transcription: unexpected status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var payload deepgramModelsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("deepgram transcription: decode list models response: %w", err)
+	}
+
+	models := make([]*sdk.TranscriptionModel, 0, len(payload.STT))
+	for _, m := range payload.STT {
+		if m.CanonicalName != "" {
+			models = append(models, p.TranscriptionModel(m.CanonicalName))
+		}
+	}
+	if len(models) == 0 {
+		return nil, errors.New("deepgram transcription: no transcription models returned by provider")
+	}
+	return models, nil
+}
+
+type deepgramModelsResponse struct {
+	STT []deepgramModel `json:"stt"`
+	TTS []deepgramModel `json:"tts"`
+}
+
+type deepgramModel struct {
+	CanonicalName string `json:"canonical_name"`
 }
 
 type audioConfig struct {

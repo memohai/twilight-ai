@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -72,8 +73,55 @@ func (p *Provider) SpeechModel(id string) *sdk.SpeechModel {
 }
 
 // ListModels returns the speech models exposed by this provider.
-func (p *Provider) ListModels(context.Context) ([]*sdk.SpeechModel, error) {
-	return nil, fmt.Errorf("deepgram speech: provider does not expose a remote models discovery API in this SDK")
+func (p *Provider) ListModels(ctx context.Context) ([]*sdk.SpeechModel, error) {
+	resp, err := p.listModels(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	models := make([]*sdk.SpeechModel, 0, len(resp.TTS))
+	for _, m := range resp.TTS {
+		if m.CanonicalName != "" {
+			models = append(models, p.SpeechModel(m.CanonicalName))
+		}
+	}
+	if len(models) == 0 {
+		return nil, errors.New("deepgram speech: no speech models returned by provider")
+	}
+	return models, nil
+}
+
+type deepgramModelsResponse struct {
+	STT []deepgramModel `json:"stt"`
+	TTS []deepgramModel `json:"tts"`
+}
+
+type deepgramModel struct {
+	CanonicalName string `json:"canonical_name"`
+}
+
+func (p *Provider) listModels(ctx context.Context) (*deepgramModelsResponse, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+"/v1/models", http.NoBody)
+	if err != nil {
+		return nil, fmt.Errorf("deepgram speech: build list models request: %w", err)
+	}
+	req.Header.Set("Authorization", "Token "+p.apiKey)
+
+	resp, err := p.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("deepgram speech: list models request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("deepgram speech: unexpected status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var payload deepgramModelsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("deepgram speech: decode list models response: %w", err)
+	}
+	return &payload, nil
 }
 
 // DoSynthesize synthesizes speech and returns the complete audio bytes.

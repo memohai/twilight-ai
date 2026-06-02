@@ -151,8 +151,8 @@ func TestProvider_SpeechModel(t *testing.T) {
 
 func TestProvider_ListModels(t *testing.T) {
 	t.Parallel()
-	p := New()
 
+	p := New()
 	models, err := p.ListModels(context.Background())
 	if err == nil {
 		t.Fatal("expected unsupported error")

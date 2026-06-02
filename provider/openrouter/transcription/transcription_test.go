@@ -12,7 +12,13 @@ import (
 func TestProvider_ListModels(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"data":[{"id":"openai/gpt-4o-mini-transcribe","architecture":{"input_modalities":["audio"],"output_modalities":["text"]}},{"id":"openai/gpt-4o-mini","architecture":{"input_modalities":["text"],"output_modalities":["text"]}}]}`))
+		if r.URL.Path != "/models" {
+			t.Errorf("path = %s, want /models", r.URL.Path)
+		}
+		if r.URL.Query().Get("output_modalities") != "all" {
+			t.Errorf("output_modalities = %q, want all", r.URL.Query().Get("output_modalities"))
+		}
+		_, _ = w.Write([]byte(`{"data":[{"id":"openai/gpt-4o-mini-transcribe","architecture":{"input_modalities":["audio"],"output_modalities":["text"]}},{"id":"openai/gpt-audio-mini","architecture":{"input_modalities":["text"],"output_modalities":["audio"]}},{"id":"openai/gpt-4o-mini","architecture":{"input_modalities":["text"],"output_modalities":["text"]}}]}`))
 	}))
 	defer srv.Close()
 
