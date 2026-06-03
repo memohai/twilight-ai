@@ -27,6 +27,8 @@ const (
 	blockTypeText     = "text"
 	blockTypeThinking = "thinking"
 	blockTypeToolUse  = "tool_use"
+
+	thinkingTypeDisabled = "disabled"
 )
 
 // ThinkingConfig controls extended thinking for Anthropic models.
@@ -243,7 +245,7 @@ func (p *Provider) buildRequest(params *sdk.GenerateParams) *messagesRequest {
 		req.ToolChoice = convertToolChoice(params.ToolChoice)
 	}
 
-	if p.thinking != nil && p.thinking.Type != "" && p.thinking.Type != "disabled" {
+	if p.thinking != nil && p.thinking.Type != "" && p.thinking.Type != thinkingTypeDisabled {
 		req.Thinking = &anthropicThinking{
 			Type:         p.thinking.Type,
 			BudgetTokens: p.thinking.BudgetTokens,
@@ -270,7 +272,7 @@ func resolveMaxTokens(params *sdk.GenerateParams, thinking *ThinkingConfig) *int
 
 	maxTokens := defaultMaxTokens
 	switch {
-	case thinking != nil && thinking.Type != "" && thinking.Type != "disabled" && thinking.BudgetTokens > 0:
+	case thinking != nil && thinking.Type != "" && thinking.Type != thinkingTypeDisabled && thinking.BudgetTokens > 0:
 		// Explicit budget thinking: reserve room for the thinking budget on top
 		// of the answer budget.
 		maxTokens += thinking.BudgetTokens
@@ -287,7 +289,7 @@ func resolveMaxTokens(params *sdk.GenerateParams, thinking *ThinkingConfig) *int
 // reasoningActive reports whether the request enables reasoning without an
 // explicit token budget (adaptive thinking and/or output_config.effort).
 func reasoningActive(params *sdk.GenerateParams, thinking *ThinkingConfig) bool {
-	if thinking != nil && thinking.Type != "" && thinking.Type != "disabled" {
+	if thinking != nil && thinking.Type != "" && thinking.Type != thinkingTypeDisabled {
 		return true
 	}
 	if params.ReasoningEffort != nil && strings.TrimSpace(*params.ReasoningEffort) != "" {
