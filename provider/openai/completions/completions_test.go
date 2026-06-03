@@ -843,6 +843,42 @@ func TestDoGenerate_DeepSeekCompatLeavesOtherReasoningEffortAlone(t *testing.T) 
 	}
 }
 
+func TestDoGenerate_MapsMaxReasoningEffortToXHigh(t *testing.T) {
+	var body struct {
+		ReasoningEffort *string `json:"reasoning_effort"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id":    "chatcmpl-reasoning",
+			"model": "gpt-5.2",
+			"choices": []map[string]any{{
+				"index":         0,
+				"finish_reason": "stop",
+				"message":       map[string]any{"role": "assistant", "content": "ok"},
+			}},
+			"usage": map[string]any{"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+		})
+	}))
+	defer srv.Close()
+
+	p := completions.New(completions.WithAPIKey("k"), completions.WithBaseURL(srv.URL))
+	_, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model:           &sdk.Model{ID: "gpt-5.2"},
+		Messages:        []sdk.Message{sdk.UserMessage("hi")},
+		ReasoningEffort: stringPtr("max"),
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate: %v", err)
+	}
+	if body.ReasoningEffort == nil || *body.ReasoningEffort != "xhigh" {
+		t.Fatalf("reasoning_effort: got %v, want xhigh", body.ReasoningEffort)
+	}
+}
+
 func TestDoStream_ReasoningFallback(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

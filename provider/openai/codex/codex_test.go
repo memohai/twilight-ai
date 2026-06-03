@@ -96,6 +96,45 @@ func TestCodexDoGenerate_RequestShapeAndStream(t *testing.T) {
 	}
 }
 
+func TestCodexDoGenerate_MapsMaxReasoningEffortToXHigh(t *testing.T) {
+	var body struct {
+		Reasoning *struct {
+			Effort string `json:"effort"`
+		} `json:"reasoning"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: response.created\n"))
+		_, _ = w.Write([]byte("data: {\"response\":{\"id\":\"resp_123\",\"created_at\":1700000000,\"model\":\"gpt-5.2\"}}\n\n"))
+		_, _ = w.Write([]byte("event: response.output_item.added\n"))
+		_, _ = w.Write([]byte("data: {\"output_index\":0,\"item\":{\"type\":\"message\",\"id\":\"msg_1\"}}\n\n"))
+		_, _ = w.Write([]byte("event: response.output_text.delta\n"))
+		_, _ = w.Write([]byte("data: {\"item_id\":\"msg_1\",\"delta\":\"ok\"}\n\n"))
+		_, _ = w.Write([]byte("event: response.output_item.done\n"))
+		_, _ = w.Write([]byte("data: {\"output_index\":0,\"item\":{\"type\":\"message\",\"id\":\"msg_1\"}}\n\n"))
+		_, _ = w.Write([]byte("event: response.completed\n"))
+		_, _ = w.Write([]byte("data: {\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n"))
+	}))
+	defer srv.Close()
+
+	p := codex.New(codex.WithAccessToken("token-123"), codex.WithBaseURL(srv.URL))
+	effort := "max"
+	_, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model:           p.ChatModel("gpt-5.2"),
+		Messages:        []sdk.Message{sdk.UserMessage("hi")},
+		ReasoningEffort: &effort,
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate: %v", err)
+	}
+	if body.Reasoning == nil || body.Reasoning.Effort != "xhigh" {
+		t.Fatalf("reasoning.effort: got %#v, want xhigh", body.Reasoning)
+	}
+}
+
 func TestCodexListModels(t *testing.T) {
 	p := codex.New(codex.WithAccessToken("token-123"), codex.WithAccountID("acct_123"))
 	models, err := p.ListModels(context.Background())

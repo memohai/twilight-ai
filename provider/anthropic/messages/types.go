@@ -3,23 +3,31 @@ package messages
 // --- Request types ---
 
 type messagesRequest struct {
-	Model         string               `json:"model"`
-	MaxTokens     *int                 `json:"max_tokens,omitempty"`
-	System        []contentBlock       `json:"system,omitempty"`
-	Messages      []anthropicMessage   `json:"messages"`
-	Tools         []anthropicTool      `json:"tools,omitempty"`
-	ToolChoice    *anthropicToolChoice `json:"tool_choice,omitempty"`
-	Temperature   *float64             `json:"temperature,omitempty"`
-	TopP          *float64             `json:"top_p,omitempty"`
-	TopK          *int                 `json:"top_k,omitempty"`
-	StopSequences []string             `json:"stop_sequences,omitempty"`
-	Stream        bool                 `json:"stream,omitempty"`
-	Thinking      *anthropicThinking   `json:"thinking,omitempty"`
+	Model         string                 `json:"model"`
+	MaxTokens     *int                   `json:"max_tokens,omitempty"`
+	System        []contentBlock         `json:"system,omitempty"`
+	Messages      []anthropicMessage     `json:"messages"`
+	Tools         []anthropicTool        `json:"tools,omitempty"`
+	ToolChoice    *anthropicToolChoice   `json:"tool_choice,omitempty"`
+	Temperature   *float64               `json:"temperature,omitempty"`
+	TopP          *float64               `json:"top_p,omitempty"`
+	TopK          *int                   `json:"top_k,omitempty"`
+	StopSequences []string               `json:"stop_sequences,omitempty"`
+	Stream        bool                   `json:"stream,omitempty"`
+	Thinking      *anthropicThinking     `json:"thinking,omitempty"`
+	OutputConfig  *anthropicOutputConfig `json:"output_config,omitempty"`
 }
 
 type anthropicThinking struct {
 	Type         string `json:"type"`
 	BudgetTokens int    `json:"budget_tokens,omitempty"`
+}
+
+// anthropicOutputConfig maps to Anthropic's output_config object. Effort is the
+// reasoning-effort tier ("low"/"medium"/"high"/"xhigh"/"max"); it controls total
+// token output and supersedes thinking.budget_tokens on modern Claude models.
+type anthropicOutputConfig struct {
+	Effort string `json:"effort,omitempty"`
 }
 
 type anthropicMessage struct {
@@ -85,14 +93,14 @@ type anthropicToolChoice struct {
 // --- Response types ---
 
 type messagesResponse struct {
-	ID           string        `json:"id"`
-	Type         string        `json:"type"`
-	Model        string        `json:"model"`
-	Role         string        `json:"role"`
+	ID           string          `json:"id"`
+	Type         string          `json:"type"`
+	Model        string          `json:"model"`
+	Role         string          `json:"role"`
 	Content      []responseBlock `json:"content"`
-	StopReason   string        `json:"stop_reason"`
-	StopSequence string        `json:"stop_sequence"`
-	Usage        messagesUsage `json:"usage"`
+	StopReason   string          `json:"stop_reason"`
+	StopSequence string          `json:"stop_sequence"`
+	Usage        messagesUsage   `json:"usage"`
 }
 
 type responseBlock struct {
