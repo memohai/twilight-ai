@@ -97,6 +97,50 @@ func TestResponsesDoGenerate(t *testing.T) {
 	}
 }
 
+func TestResponsesDoGenerate_MapsMaxReasoningEffortToXHigh(t *testing.T) {
+	var body struct {
+		Reasoning *struct {
+			Effort string `json:"effort"`
+		} `json:"reasoning"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id":         "resp_reasoning",
+			"created_at": 1700000000,
+			"model":      "gpt-5.2",
+			"output": []map[string]any{{
+				"type": "message",
+				"id":   "msg_001",
+				"role": "assistant",
+				"content": []map[string]any{{
+					"type": "output_text",
+					"text": "ok",
+				}},
+			}},
+			"usage": map[string]any{"input_tokens": 1, "output_tokens": 1},
+		})
+	}))
+	defer srv.Close()
+
+	p := responses.New(responses.WithAPIKey("test-key"), responses.WithBaseURL(srv.URL))
+	effort := "max"
+	_, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model:           p.ChatModel("gpt-5.2"),
+		Messages:        []sdk.Message{sdk.UserMessage("hi")},
+		ReasoningEffort: &effort,
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate: %v", err)
+	}
+	if body.Reasoning == nil || body.Reasoning.Effort != "xhigh" {
+		t.Fatalf("reasoning.effort: got %#v, want xhigh", body.Reasoning)
+	}
+}
+
 func TestResponsesDoGenerate_WithBedrockCredentials(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got == "" || got[:16] != "AWS4-HMAC-SHA256" {

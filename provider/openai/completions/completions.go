@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/memohai/twilight-ai/internal/utils"
+	openaiutil "github.com/memohai/twilight-ai/provider/openai"
 	"github.com/memohai/twilight-ai/sdk"
 )
 
@@ -222,7 +223,7 @@ func (p *Provider) buildRequest(params *sdk.GenerateParams) *chatRequest {
 		FrequencyPenalty:    params.FrequencyPenalty,
 		PresencePenalty:     params.PresencePenalty,
 		Seed:                params.Seed,
-		ReasoningEffort:     params.ReasoningEffort,
+		ReasoningEffort:     normalizeReasoningEffort(params.ReasoningEffort),
 	}
 	if len(params.StopSequences) > 0 {
 		req.Stop = params.StopSequences
@@ -239,6 +240,14 @@ func (p *Provider) buildRequest(params *sdk.GenerateParams) *chatRequest {
 	}
 	p.applyChatCompletionsCompat(req)
 	return req
+}
+
+func normalizeReasoningEffort(effort *string) *string {
+	if effort == nil {
+		return nil
+	}
+	normalized := openaiutil.NormalizeReasoningEffort(*effort)
+	return &normalized
 }
 
 func (p *Provider) applyChatCompletionsCompat(req *chatRequest) {
