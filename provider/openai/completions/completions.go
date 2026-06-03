@@ -27,7 +27,10 @@ type Option func(*Provider)
 
 type chatCompletionsCompat string
 
-const chatCompletionsCompatDeepSeek chatCompletionsCompat = "deepseek"
+const (
+	chatCompletionsCompatDeepSeek chatCompletionsCompat = "deepseek"
+	chatCompletionsCompatMiniMax  chatCompletionsCompat = "minimax"
+)
 
 func WithAPIKey(apiKey string) Option {
 	return func(p *Provider) {
@@ -68,6 +71,16 @@ func WithHTTPClient(client *http.Client) Option {
 func WithDeepSeekChatCompletionsCompat() Option {
 	return func(p *Provider) {
 		p.compat = chatCompletionsCompatDeepSeek
+	}
+}
+
+// WithMiniMaxChatCompletionsCompat adapts MiniMax's OpenAI-compatible Chat
+// Completions transport: it sends reasoning_split=true so thinking is returned
+// in reasoning_details instead of inline <think> tags, and maps reasoning
+// efforts onto MiniMax's thinking toggle (none -> disabled, otherwise adaptive).
+func WithMiniMaxChatCompletionsCompat() Option {
+	return func(p *Provider) {
+		p.compat = chatCompletionsCompatMiniMax
 	}
 }
 
@@ -229,20 +242,38 @@ func (p *Provider) buildRequest(params *sdk.GenerateParams) *chatRequest {
 }
 
 func (p *Provider) applyChatCompletionsCompat(req *chatRequest) {
-	if p.compat != chatCompletionsCompatDeepSeek {
-		return
-	}
-	if req.ReasoningEffort == nil {
-		return
-	}
-	effort := strings.TrimSpace(*req.ReasoningEffort)
-	if effort == "" {
-		return
-	}
-	switch strings.ToLower(effort) {
-	case "none", "disable", "disabled":
+	switch p.compat {
+	case chatCompletionsCompatDeepSeek:
+		if req.ReasoningEffort == nil {
+			return
+		}
+		effort := strings.TrimSpace(*req.ReasoningEffort)
+		if effort == "" {
+			return
+		}
+		switch strings.ToLower(effort) {
+		case "none", "disable", "disabled":
+			req.ReasoningEffort = nil
+			req.Thinking = &chatThinking{Type: "disabled"}
+		}
+	case chatCompletionsCompatMiniMax:
+		// MiniMax does not honor reasoning_effort; it gates thinking via the
+		// thinking toggle and separates reasoning into reasoning_details when
+		// reasoning_split is set.
+		req.ReasoningSplit = true
+		if req.ReasoningEffort == nil {
+			return
+		}
+		effort := strings.ToLower(strings.TrimSpace(*req.ReasoningEffort))
 		req.ReasoningEffort = nil
-		req.Thinking = &chatThinking{Type: "disabled"}
+		switch effort {
+		case "":
+			// no explicit effort: leave thinking at MiniMax's default.
+		case "none", "disable", "disabled":
+			req.Thinking = &chatThinking{Type: "disabled"}
+		default:
+			req.Thinking = &chatThinking{Type: "adaptive"}
+		}
 	}
 }
 
@@ -299,6 +330,7 @@ func convertAssistantMessage(msg sdk.Message) chatMessage {
 	var contentParts []sdk.MessagePart
 	var toolCalls []chatToolCall
 	var reasoning string
+	var reasoningDetails []chatReasoningDetail
 
 	for _, part := range msg.Content {
 		switch p := part.(type) {
@@ -321,6 +353,9 @@ func convertAssistantMessage(msg sdk.Message) chatMessage {
 			})
 		case sdk.ReasoningPart:
 			reasoning += p.Text
+			if details := extractMiniMaxReasoningDetails(p.ProviderMetadata); len(details) > 0 {
+				reasoningDetails = details
+			}
 		default:
 			contentParts = append(contentParts, part)
 		}
@@ -329,7 +364,9 @@ func convertAssistantMessage(msg sdk.Message) chatMessage {
 	if len(contentParts) > 0 {
 		cm.Content = convertContent(contentParts)
 	}
-	if reasoning != "" {
+	if len(reasoningDetails) > 0 {
+		cm.ReasoningDetails = reasoningDetails
+	} else if reasoning != "" {
 		cm.ReasoningContent = reasoning
 	}
 	if len(toolCalls) > 0 {
@@ -394,6 +431,9 @@ func (p *Provider) parseResponse(resp *chatResponse) (*sdk.GenerateResult, error
 		choice := resp.Choices[0]
 		result.Text = choice.Message.Content
 		result.Reasoning = reasoningFromMessage(&choice.Message)
+		if len(choice.Message.ReasoningDetails) > 0 {
+			result.ReasoningProviderMetadata = minimaxReasoningMetadata(choice.Message.ReasoningDetails)
+		}
 		result.FinishReason = mapFinishReason(choice.FinishReason)
 		result.RawFinishReason = choice.FinishReason
 
@@ -521,6 +561,11 @@ type streamingToolCall struct {
 // ---------- helpers ----------
 
 func reasoningFromMessage(m *chatRespMessage) string {
+	if len(m.ReasoningDetails) > 0 {
+		if text := reasoningTextFromDetails(m.ReasoningDetails); text != "" {
+			return text
+		}
+	}
 	if m.ReasoningContent != "" {
 		return m.ReasoningContent
 	}
@@ -528,10 +573,85 @@ func reasoningFromMessage(m *chatRespMessage) string {
 }
 
 func reasoningFromDelta(d *chatChunkDelta) string {
+	if len(d.ReasoningDetails) > 0 {
+		if text := reasoningTextFromDetails(d.ReasoningDetails); text != "" {
+			return text
+		}
+	}
 	if d.ReasoningContent != "" {
 		return d.ReasoningContent
 	}
 	return d.Reasoning
+}
+
+func reasoningTextFromDetails(details []chatReasoningDetail) string {
+	for i := len(details) - 1; i >= 0; i-- {
+		if text, _ := details[i]["text"].(string); text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func minimaxReasoningMetadata(details []chatReasoningDetail) map[string]any {
+	if len(details) == 0 {
+		return nil
+	}
+	return map[string]any{
+		"minimax": map[string]any{
+			"reasoning_details": copyReasoningDetails(details),
+		},
+	}
+}
+
+func extractMiniMaxReasoningDetails(meta map[string]any) []chatReasoningDetail {
+	if meta == nil {
+		return nil
+	}
+	minimax, ok := meta["minimax"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	return coerceReasoningDetails(minimax["reasoning_details"])
+}
+
+func coerceReasoningDetails(raw any) []chatReasoningDetail {
+	switch v := raw.(type) {
+	case []chatReasoningDetail:
+		return copyReasoningDetails(v)
+	case []map[string]any:
+		out := make([]chatReasoningDetail, 0, len(v))
+		for _, detail := range v {
+			out = append(out, copyReasoningDetail(detail))
+		}
+		return out
+	case []any:
+		out := make([]chatReasoningDetail, 0, len(v))
+		for _, item := range v {
+			if detail, ok := item.(map[string]any); ok {
+				out = append(out, copyReasoningDetail(detail))
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func copyReasoningDetails(details []chatReasoningDetail) []chatReasoningDetail {
+	out := make([]chatReasoningDetail, 0, len(details))
+	for _, detail := range details {
+		out = append(out, copyReasoningDetail(detail))
+	}
+	return out
+}
+
+func copyReasoningDetail(detail map[string]any) chatReasoningDetail {
+	out := make(chatReasoningDetail, len(detail))
+	for k, v := range detail {
+		out[k] = v
+	}
+	return out
 }
 
 func convertUsage(u *chatUsage) sdk.Usage {

@@ -23,6 +23,8 @@ type streamProcessor struct {
 	flushed            bool
 	finishStepPending  bool
 	pendingToolCalls   map[int]*streamingToolCall
+	reasoningDetails   []chatReasoningDetail
+	reasoningText      string
 }
 
 func (sp *streamProcessor) send(part sdk.StreamPart) bool {
@@ -36,7 +38,7 @@ func (sp *streamProcessor) send(part sdk.StreamPart) bool {
 
 func (sp *streamProcessor) endReasoning(id string) {
 	if sp.reasoningStartSent {
-		sp.send(&sdk.ReasoningEndPart{ID: id})
+		sp.send(&sdk.ReasoningEndPart{ID: id, ProviderMetadata: minimaxReasoningMetadata(sp.reasoningDetails)})
 		sp.reasoningStartSent = false
 	}
 }
@@ -107,11 +109,38 @@ func (sp *streamProcessor) processReasoning(delta *chatChunkDelta, chunkID strin
 	if reasoningContent == "" {
 		return
 	}
+	if len(delta.ReasoningDetails) > 0 {
+		reasoningContent = trimReasoningPrefix(reasoningContent, sp.reasoningText)
+		sp.reasoningText += reasoningContent
+		sp.reasoningDetails = reasoningDetailsWithText(delta.ReasoningDetails, sp.reasoningText)
+	}
+	if reasoningContent == "" {
+		return
+	}
 	if !sp.reasoningStartSent {
 		sp.send(&sdk.ReasoningStartPart{ID: chunkID})
 		sp.reasoningStartSent = true
 	}
 	sp.send(&sdk.ReasoningDeltaPart{ID: chunkID, Text: reasoningContent})
+}
+
+func trimReasoningPrefix(text, previous string) string {
+	if previous == "" {
+		return text
+	}
+	if len(text) >= len(previous) && text[:len(previous)] == previous {
+		return text[len(previous):]
+	}
+	return text
+}
+
+func reasoningDetailsWithText(details []chatReasoningDetail, text string) []chatReasoningDetail {
+	if len(details) == 0 {
+		return nil
+	}
+	out := copyReasoningDetails(details)
+	out[len(out)-1]["text"] = text
+	return out
 }
 
 func (sp *streamProcessor) processContent(delta *chatChunkDelta, chunkID string) {

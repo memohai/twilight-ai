@@ -1218,11 +1218,21 @@ func WithAPIKey(apiKey string) Option
 func WithBaseURL(baseURL string) Option
 func WithHTTPClient(client *http.Client) Option
 func WithDeepSeekChatCompletionsCompat() Option
+func WithMiniMaxChatCompletionsCompat() Option
 ```
 
 `WithDeepSeekChatCompletionsCompat` keeps the generic `/chat/completions`
 transport while adapting DeepSeek's thinking toggle: `WithReasoningEffort("none")`
 sends `thinking: {type: "disabled"}` and omits `reasoning_effort`.
+
+`WithMiniMaxChatCompletionsCompat` keeps the generic `/chat/completions`
+transport while adapting MiniMax: it sends `reasoning_split: true` (so reasoning
+is returned in the `reasoning_details` field instead of inline `<think>` tags)
+and maps reasoning effort onto MiniMax's `thinking` toggle —
+`WithReasoningEffort("none")` sends `thinking: {type: "disabled"}`, any other
+effort sends `thinking: {type: "adaptive"}`, and `reasoning_effort` is omitted.
+The provider reads `reasoning_details` as reasoning text and preserves it in
+assistant history for later tool-call turns.
 
 #### Methods
 

@@ -1471,6 +1471,279 @@ func TestTestModel_NotSupported(t *testing.T) {
 	}
 }
 
+func TestDoGenerate_MiniMaxCompatDisablesThinkingAndSplitsReasoning(t *testing.T) {
+	var body struct {
+		ReasoningEffort *string `json:"reasoning_effort"`
+		ReasoningSplit  bool    `json:"reasoning_split"`
+		Thinking        *struct {
+			Type string `json:"type"`
+		} `json:"thinking"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id":    "chatcmpl-minimax",
+			"model": "MiniMax-M3",
+			"choices": []map[string]any{{
+				"index":         0,
+				"finish_reason": "stop",
+				"message":       map[string]any{"role": "assistant", "content": "ok"},
+			}},
+			"usage": map[string]any{"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+		})
+	}))
+	defer srv.Close()
+
+	p := completions.New(
+		completions.WithAPIKey("k"),
+		completions.WithBaseURL(srv.URL),
+		completions.WithMiniMaxChatCompletionsCompat(),
+	)
+	_, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model:           &sdk.Model{ID: "MiniMax-M3"},
+		Messages:        []sdk.Message{sdk.UserMessage("hi")},
+		ReasoningEffort: stringPtr("none"),
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate: %v", err)
+	}
+	if !body.ReasoningSplit {
+		t.Fatal("expected reasoning_split=true")
+	}
+	if body.ReasoningEffort != nil {
+		t.Fatalf("reasoning_effort should be omitted, got %q", *body.ReasoningEffort)
+	}
+	if body.Thinking == nil || body.Thinking.Type != "disabled" {
+		t.Fatalf("thinking: got %#v, want disabled", body.Thinking)
+	}
+}
+
+func TestDoGenerate_MiniMaxCompatMapsReasoningEffortToAdaptiveThinking(t *testing.T) {
+	var body struct {
+		ReasoningEffort *string `json:"reasoning_effort"`
+		ReasoningSplit  bool    `json:"reasoning_split"`
+		Thinking        *struct {
+			Type string `json:"type"`
+		} `json:"thinking"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id":    "chatcmpl-minimax",
+			"model": "MiniMax-M3",
+			"choices": []map[string]any{{
+				"index":         0,
+				"finish_reason": "stop",
+				"message":       map[string]any{"role": "assistant", "content": "ok"},
+			}},
+			"usage": map[string]any{"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+		})
+	}))
+	defer srv.Close()
+
+	p := completions.New(
+		completions.WithAPIKey("k"),
+		completions.WithBaseURL(srv.URL),
+		completions.WithMiniMaxChatCompletionsCompat(),
+	)
+	_, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model:           &sdk.Model{ID: "MiniMax-M3"},
+		Messages:        []sdk.Message{sdk.UserMessage("hi")},
+		ReasoningEffort: stringPtr("high"),
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate: %v", err)
+	}
+	if !body.ReasoningSplit {
+		t.Fatal("expected reasoning_split=true")
+	}
+	if body.ReasoningEffort != nil {
+		t.Fatalf("reasoning_effort should be omitted, got %q", *body.ReasoningEffort)
+	}
+	if body.Thinking == nil || body.Thinking.Type != "adaptive" {
+		t.Fatalf("thinking: got %#v, want adaptive", body.Thinking)
+	}
+}
+
+func TestGenerateTextResult_MiniMaxReasoningDetailsPreserved(t *testing.T) {
+	var call int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		call++
+		if call == 2 {
+			var body struct {
+				Messages []json.RawMessage `json:"messages"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode request body: %v", err)
+			}
+			if len(body.Messages) < 2 {
+				t.Fatalf("expected assistant history in second request, got %d messages", len(body.Messages))
+			}
+			var assistantMsg struct {
+				ReasoningContent string           `json:"reasoning_content"`
+				ReasoningDetails []map[string]any `json:"reasoning_details"`
+			}
+			if err := json.Unmarshal(body.Messages[1], &assistantMsg); err != nil {
+				t.Fatalf("decode assistant history: %v", err)
+			}
+			if assistantMsg.ReasoningContent != "" {
+				t.Fatalf("reasoning_content should be omitted for MiniMax history, got %q", assistantMsg.ReasoningContent)
+			}
+			if len(assistantMsg.ReasoningDetails) != 1 || assistantMsg.ReasoningDetails[0]["text"] != "Let me think" {
+				t.Fatalf("reasoning_details: got %#v", assistantMsg.ReasoningDetails)
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id":    "chatcmpl-minimax",
+			"model": "MiniMax-M3",
+			"choices": []map[string]any{{
+				"index":         0,
+				"finish_reason": "stop",
+				"message": map[string]any{
+					"role":              "assistant",
+					"content":           "ok",
+					"reasoning_content": "legacy reasoning",
+					"reasoning_details": []map[string]any{{
+						"type":   "reasoning.text",
+						"id":     "reasoning-text-1",
+						"format": "MiniMax-response-v1",
+						"index":  0,
+						"text":   "Let me think",
+					}},
+				},
+			}},
+			"usage": map[string]any{"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+		})
+	}))
+	defer srv.Close()
+
+	p := completions.New(
+		completions.WithAPIKey("k"),
+		completions.WithBaseURL(srv.URL),
+		completions.WithMiniMaxChatCompletionsCompat(),
+	)
+	model := p.ChatModel("MiniMax-M3")
+
+	result, err := sdk.GenerateTextResult(
+		context.Background(),
+		sdk.WithModel(model),
+		sdk.WithMessages([]sdk.Message{sdk.UserMessage("hi")}),
+	)
+	if err != nil {
+		t.Fatalf("GenerateTextResult: %v", err)
+	}
+	if result.Reasoning != "Let me think" {
+		t.Fatalf("reasoning: got %q", result.Reasoning)
+	}
+
+	history := make([]sdk.Message, 0, 1+len(result.Messages)+1)
+	history = append(history, sdk.UserMessage("hi"))
+	history = append(history, result.Messages...)
+	history = append(history, sdk.UserMessage("continue"))
+	if _, err := sdk.GenerateTextResult(
+		context.Background(),
+		sdk.WithModel(model),
+		sdk.WithMessages(history),
+	); err != nil {
+		t.Fatalf("second GenerateTextResult: %v", err)
+	}
+}
+
+func TestDoStream_MiniMaxReasoningDetails(t *testing.T) {
+	var reasoningSplit bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			ReasoningSplit bool `json:"reasoning_split"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		reasoningSplit = body.ReasoningSplit
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher := w.(http.Flusher)
+		chunks := []string{
+			`{"id":"c1","model":"MiniMax-M3","choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"legacy","reasoning_details":[{"type":"reasoning.text","id":"reasoning-text-1","format":"MiniMax-response-v1","index":0,"text":"Let"}]},"finish_reason":null}]}`,
+			`{"id":"c1","model":"MiniMax-M3","choices":[{"index":0,"delta":{"reasoning_content":" fallback","reasoning_details":[{"type":"reasoning.text","id":"reasoning-text-1","format":"MiniMax-response-v1","index":0,"text":" me think"}]},"finish_reason":null}]}`,
+			`{"id":"c1","model":"MiniMax-M3","choices":[{"index":0,"delta":{"content":"The answer"},"finish_reason":null}]}`,
+			`{"id":"c1","model":"MiniMax-M3","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":4,"total_tokens":7}}`,
+		}
+		for _, c := range chunks {
+			fmt.Fprintf(w, "data: %s\n\n", c)
+			flusher.Flush()
+		}
+		fmt.Fprintf(w, "data: [DONE]\n\n")
+		flusher.Flush()
+	}))
+	defer srv.Close()
+
+	p := completions.New(
+		completions.WithAPIKey("k"),
+		completions.WithBaseURL(srv.URL),
+		completions.WithMiniMaxChatCompletionsCompat(),
+	)
+	sr, err := p.DoStream(context.Background(), sdk.GenerateParams{
+		Model:    &sdk.Model{ID: "MiniMax-M3"},
+		Messages: []sdk.Message{sdk.UserMessage("hi")},
+	})
+	if err != nil {
+		t.Fatalf("DoStream: %v", err)
+	}
+
+	var reasoning, text string
+	var reasoningMeta map[string]any
+	for part := range sr.Stream {
+		switch p := part.(type) {
+		case *sdk.ReasoningDeltaPart:
+			reasoning += p.Text
+		case *sdk.ReasoningEndPart:
+			reasoningMeta = p.ProviderMetadata
+		case *sdk.TextDeltaPart:
+			text += p.Text
+		case *sdk.ErrorPart:
+			t.Fatalf("error: %v", p.Error)
+		}
+	}
+	if !reasoningSplit {
+		t.Fatal("expected reasoning_split=true on the streaming request")
+	}
+	if reasoning != "Let me think" {
+		t.Errorf("reasoning: got %q", reasoning)
+	}
+	details := minimaxReasoningDetailsFromTestMetadata(t, reasoningMeta)
+	if len(details) != 1 || details[0]["text"] != "Let me think" {
+		t.Errorf("reasoning metadata details: got %#v", details)
+	}
+	if text != "The answer" {
+		t.Errorf("text: got %q", text)
+	}
+}
+
+func minimaxReasoningDetailsFromTestMetadata(t *testing.T, meta map[string]any) []map[string]any {
+	t.Helper()
+	minimax, ok := meta["minimax"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected minimax metadata, got %#v", meta)
+	}
+	raw, err := json.Marshal(minimax["reasoning_details"])
+	if err != nil {
+		t.Fatalf("marshal reasoning_details metadata: %v", err)
+	}
+	var details []map[string]any
+	if err := json.Unmarshal(raw, &details); err != nil {
+		t.Fatalf("unmarshal reasoning_details metadata: %v", err)
+	}
+	return details
+}
+
 func stringPtr(s string) *string { return &s }
 
 func TestMain(m *testing.M) {

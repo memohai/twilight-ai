@@ -17,6 +17,7 @@ type chatRequest struct {
 	Seed                *int               `json:"seed,omitempty"`
 	ReasoningEffort     *string            `json:"reasoning_effort,omitempty"`
 	Thinking            *chatThinking      `json:"thinking,omitempty"`
+	ReasoningSplit      bool               `json:"reasoning_split,omitempty"`
 	Stream              bool               `json:"stream,omitempty"`
 	StreamOptions       *chatStreamOptions `json:"stream_options,omitempty"`
 }
@@ -46,12 +47,15 @@ type chatFunction struct {
 }
 
 type chatMessage struct {
-	Role             string         `json:"role"`
-	Content          any            `json:"content"`
-	ReasoningContent string         `json:"reasoning_content,omitempty"`
-	ToolCalls        []chatToolCall `json:"tool_calls,omitempty"`
-	ToolCallID       string         `json:"tool_call_id,omitempty"`
+	Role             string                `json:"role"`
+	Content          any                   `json:"content"`
+	ReasoningContent string                `json:"reasoning_content,omitempty"`
+	ReasoningDetails []chatReasoningDetail `json:"reasoning_details,omitempty"`
+	ToolCalls        []chatToolCall        `json:"tool_calls,omitempty"`
+	ToolCallID       string                `json:"tool_call_id,omitempty"`
 }
+
+type chatReasoningDetail map[string]any
 
 type chatContentPartText struct {
 	Type string `json:"type"`
@@ -86,13 +90,14 @@ type chatChoice struct {
 }
 
 type chatRespMessage struct {
-	Role             string          `json:"role"`
-	Content          string          `json:"content"`
-	ReasoningContent string          `json:"reasoning_content,omitempty"`
-	Reasoning        string          `json:"reasoning,omitempty"`
-	Refusal          string          `json:"refusal,omitempty"`
-	ToolCalls        []chatToolCall  `json:"tool_calls,omitempty"`
-	Images           []chatImagePart `json:"images,omitempty"`
+	Role             string                `json:"role"`
+	Content          string                `json:"content"`
+	ReasoningContent string                `json:"reasoning_content,omitempty"`
+	ReasoningDetails []chatReasoningDetail `json:"reasoning_details,omitempty"`
+	Reasoning        string                `json:"reasoning,omitempty"`
+	Refusal          string                `json:"refusal,omitempty"`
+	ToolCalls        []chatToolCall        `json:"tool_calls,omitempty"`
+	Images           []chatImagePart       `json:"images,omitempty"`
 }
 
 type chatToolCall struct {
@@ -141,13 +146,14 @@ type chatChunkChoice struct {
 }
 
 type chatChunkDelta struct {
-	Role             string              `json:"role,omitempty"`
-	Content          string              `json:"content,omitempty"`
-	ReasoningContent string              `json:"reasoning_content,omitempty"`
-	Reasoning        string              `json:"reasoning,omitempty"`
-	Refusal          string              `json:"refusal,omitempty"`
-	ToolCalls        []chatToolCallChunk `json:"tool_calls,omitempty"`
-	Images           []chatImagePart     `json:"images,omitempty"`
+	Role             string                `json:"role,omitempty"`
+	Content          string                `json:"content,omitempty"`
+	ReasoningContent string                `json:"reasoning_content,omitempty"`
+	ReasoningDetails []chatReasoningDetail `json:"reasoning_details,omitempty"`
+	Reasoning        string                `json:"reasoning,omitempty"`
+	Refusal          string                `json:"refusal,omitempty"`
+	ToolCalls        []chatToolCallChunk   `json:"tool_calls,omitempty"`
+	Images           []chatImagePart       `json:"images,omitempty"`
 }
 
 type chatImagePart struct {
