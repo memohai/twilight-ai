@@ -101,6 +101,7 @@ model := provider.ChatModel("gpt-4o-mini")
 | `WithBaseURL(url)` | `https://api.openai.com/v1` | Base URL for API requests |
 | `WithHTTPClient(client)` | `&http.Client{}` | Custom HTTP client (for proxies, timeouts, etc.) |
 | `WithDeepSeekChatCompletionsCompat()` | disabled | Map `WithReasoningEffort("none")` to DeepSeek's thinking disable toggle |
+| `WithMiniMaxChatCompletionsCompat()` | disabled | Send `reasoning_split: true` and map reasoning effort to MiniMax's thinking toggle |
 
 ### API Endpoints for Discovery
 
@@ -137,6 +138,34 @@ adapts DeepSeek's thinking toggle:
 Note: `"none"` is the effort floor, which for DeepSeek means off. Sending
 `reasoning_effort: "none"` alone does not stop it thinking, so the provider sends
 `thinking: {type: "disabled"}` instead.
+
+MiniMax also uses the OpenAI-compatible endpoint, but ignores `reasoning_effort`
+and, by default, inlines reasoning into `content` as `<think>` tags. Enable the
+MiniMax compatibility option to get clean, separated reasoning:
+
+```go
+// MiniMax
+provider := completions.New(
+    completions.WithAPIKey("your-minimax-key"),
+    completions.WithBaseURL("https://api.minimax.io/v1"),
+    completions.WithMiniMaxChatCompletionsCompat(),
+)
+```
+
+Use `https://api.minimaxi.com/v1` instead for China-region MiniMax API keys.
+
+The option always sends `reasoning_split: true` (so reasoning is returned in
+`reasoning_details`) and maps reasoning effort to MiniMax's `thinking` toggle:
+
+| SDK option/value | MiniMax request |
+|------------------|-----------------|
+| `WithReasoningEffort("none")` | `thinking: {type: "disabled"}` |
+| any other `WithReasoningEffort(...)` value | `thinking: {type: "adaptive"}` |
+| no reasoning effort | `thinking` omitted (MiniMax default) |
+
+Reasoning is read from `reasoning_details` and preserved in assistant history, so
+MiniMax otherwise uses the generic Chat Completions path with minimal special
+handling.
 
 Other OpenAI-compatible services use `completions.New()` with a base URL:
 
