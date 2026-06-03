@@ -50,7 +50,7 @@ func (p *Provider) SpeechModel(id string) *sdk.SpeechModel {
 
 // ListModels returns the speech models exposed by this provider.
 func (p *Provider) ListModels(context.Context) ([]*sdk.SpeechModel, error) {
-	return nil, fmt.Errorf("edge speech: provider does not expose a remote models discovery API")
+	return nil, fmt.Errorf("edge speech: provider does not expose a model discovery API; voices are bundled locally")
 }
 
 // DoSynthesize synthesizes speech and returns the complete audio.

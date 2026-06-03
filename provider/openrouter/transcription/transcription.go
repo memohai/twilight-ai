@@ -49,7 +49,7 @@ func (p *Provider) TranscriptionModel(id string) *sdk.TranscriptionModel {
 }
 
 func (p *Provider) ListModels(ctx context.Context) ([]*sdk.TranscriptionModel, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+"/models?output_modalities=text", http.NoBody)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+"/models?output_modalities=all", http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("openrouter transcription: build list models request: %w", err)
 	}
@@ -110,17 +110,13 @@ func decodeOpenRouterModels(r io.Reader) ([]openRouterModel, error) {
 }
 
 func isAudioInputModel(id string, inputs []string) bool {
-	lowerID := strings.ToLower(id)
-	if strings.Contains(lowerID, "transcribe") || strings.Contains(lowerID, "audio") {
-		return true
-	}
 	for _, input := range inputs {
-		switch strings.ToLower(input) {
-		case "audio", "file":
+		if strings.EqualFold(input, "audio") {
 			return true
 		}
 	}
-	return false
+	lowerID := strings.ToLower(id)
+	return strings.Contains(lowerID, "transcribe")
 }
 
 type audioConfig struct {

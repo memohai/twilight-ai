@@ -188,8 +188,11 @@ func TestProvider_ListModels(t *testing.T) {
 		if r.URL.Path != "/models" {
 			t.Errorf("path = %s, want /models", r.URL.Path)
 		}
+		if r.URL.Query().Get("output_modalities") != "all" {
+			t.Errorf("output_modalities = %q, want all", r.URL.Query().Get("output_modalities"))
+		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":[{"id":"openai/gpt-audio-mini"},{"id":"openai/gpt-4o-audio-preview"},{"id":"openai/gpt-4.1-mini"}]}`))
+		_, _ = w.Write([]byte(`{"data":[{"id":"openai/gpt-audio-mini","architecture":{"input_modalities":["text"],"output_modalities":["audio"]}},{"id":"openai/gpt-4o-audio-preview","architecture":{"input_modalities":["text"],"output_modalities":["audio"]}},{"id":"openai/gpt-4.1-mini","architecture":{"input_modalities":["text"],"output_modalities":["text"]}}]}`))
 	}))
 	defer srv.Close()
 
@@ -209,7 +212,7 @@ func TestProvider_ListModels(t *testing.T) {
 func TestProvider_ListModels_ArrayResponse(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`[{"id":"openai/gpt-audio-mini"},{"id":"openai/gpt-4o-audio-preview"},{"id":"openai/gpt-4.1-mini"}]`))
+		_, _ = w.Write([]byte(`[{"id":"openai/gpt-audio-mini","architecture":{"input_modalities":["text"],"output_modalities":["audio"]}},{"id":"openai/gpt-4o-audio-preview","architecture":{"input_modalities":["text"],"output_modalities":["speech"]}},{"id":"openai/gpt-4.1-mini","architecture":{"input_modalities":["text"],"output_modalities":["text"]}}]`))
 	}))
 	defer srv.Close()
 

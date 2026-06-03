@@ -100,7 +100,7 @@ func (p *Provider) SpeechModel(id string) *sdk.SpeechModel {
 
 // ListModels returns the speech models exposed by this provider.
 func (p *Provider) ListModels(context.Context) ([]*sdk.SpeechModel, error) {
-	return nil, fmt.Errorf("volcengine speech: provider does not expose a remote models discovery API in this SDK")
+	return nil, fmt.Errorf("volcengine speech: provider exposes speaker or timbre lists, not a remote model discovery API for SAMI TTS")
 }
 
 // invokeResponse is the JSON structure returned by SAMI /api/v1/invoke.

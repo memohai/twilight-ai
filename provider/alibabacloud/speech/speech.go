@@ -59,7 +59,7 @@ func (p *Provider) SpeechModel(id string) *sdk.SpeechModel {
 
 // ListModels returns the speech models exposed by this provider.
 func (p *Provider) ListModels(context.Context) ([]*sdk.SpeechModel, error) {
-	return nil, fmt.Errorf("alibabacloud speech: provider does not expose a remote models discovery API")
+	return nil, fmt.Errorf("alibabacloud speech: DashScope documents CosyVoice model names but does not expose a remote model discovery API for this provider")
 }
 
 // DoSynthesize synthesizes speech and returns the complete audio bytes.

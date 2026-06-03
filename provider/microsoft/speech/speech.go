@@ -72,7 +72,7 @@ func (p *Provider) SpeechModel(id string) *sdk.SpeechModel {
 
 // ListModels returns the speech models exposed by this provider.
 func (p *Provider) ListModels(context.Context) ([]*sdk.SpeechModel, error) {
-	return nil, fmt.Errorf("microsoft speech: provider does not expose a remote models discovery API")
+	return nil, fmt.Errorf("microsoft speech: Azure exposes voice and custom voice model lists, not a standard TTS model discovery API for this provider")
 }
 
 // DoSynthesize synthesizes speech and returns the complete audio bytes.
