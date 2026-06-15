@@ -3,12 +3,12 @@ package generativeai
 // --- Request types ---
 
 type generateRequest struct {
-	Contents          []content        `json:"contents"`
-	SystemInstruction *content         `json:"systemInstruction,omitempty"`
+	Contents          []content         `json:"contents"`
+	SystemInstruction *content          `json:"systemInstruction,omitempty"`
 	GenerationConfig  *generationConfig `json:"generationConfig,omitempty"`
-	Tools             []toolGroup      `json:"tools,omitempty"`
-	ToolConfig        *toolConfig      `json:"toolConfig,omitempty"`
-	SafetySettings    []safetySetting  `json:"safetySettings,omitempty"`
+	Tools             []toolGroup       `json:"tools,omitempty"`
+	ToolConfig        *toolConfig       `json:"toolConfig,omitempty"`
+	SafetySettings    []safetySetting   `json:"safetySettings,omitempty"`
 }
 
 type content struct {
@@ -69,9 +69,9 @@ type toolGroup struct {
 }
 
 type functionDeclaration struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Parameters  any    `json:"parameters,omitempty"`
+	Name                 string `json:"name"`
+	Description          string `json:"description"`
+	ParametersJSONSchema any    `json:"parametersJsonSchema,omitempty"`
 }
 
 type toolConfig struct {
@@ -91,14 +91,14 @@ type safetySetting struct {
 // --- Response types ---
 
 type generateResponse struct {
-	Candidates    []candidate    `json:"candidates"`
-	UsageMetadata *usageMetadata `json:"usageMetadata,omitempty"`
+	Candidates     []candidate     `json:"candidates"`
+	UsageMetadata  *usageMetadata  `json:"usageMetadata,omitempty"`
 	PromptFeedback *promptFeedback `json:"promptFeedback,omitempty"`
 }
 
 type candidate struct {
-	Content      *content       `json:"content,omitempty"`
-	FinishReason string         `json:"finishReason,omitempty"`
+	Content       *content       `json:"content,omitempty"`
+	FinishReason  string         `json:"finishReason,omitempty"`
 	SafetyRatings []safetyRating `json:"safetyRatings,omitempty"`
 }
 
