@@ -355,9 +355,9 @@ func convertTools(tools []sdk.Tool, toolChoice any) ([]toolGroup, *toolConfig) {
 	decls := make([]functionDeclaration, 0, len(tools))
 	for _, t := range tools {
 		decls = append(decls, functionDeclaration{
-			Name:        t.Name,
-			Description: t.Description,
-			Parameters:  t.Parameters,
+			Name:                 t.Name,
+			Description:          t.Description,
+			ParametersJSONSchema: t.Parameters,
 		})
 	}
 
