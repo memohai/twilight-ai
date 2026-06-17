@@ -415,9 +415,10 @@ func (p *Provider) parseResponse(resp *generateResponse) (*sdk.GenerateResult, e
 					return result, fmt.Errorf("google: unmarshal function call args for %q: %w", part.FunctionCall.Name, err)
 				}
 				result.ToolCalls = append(result.ToolCalls, sdk.ToolCall{
-					ToolCallID: id,
-					ToolName:   part.FunctionCall.Name,
-					Input:      input,
+					ToolCallID:       id,
+					ToolName:         part.FunctionCall.Name,
+					Input:            input,
+					ProviderMetadata: googleThoughtSignatureMetadata(part.ThoughtSignature),
 				})
 			case part.Text != "":
 				isThought := part.Thought != nil && *part.Thought
@@ -572,9 +573,10 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 						}
 
 						send(&sdk.StreamToolCallPart{
-							ToolCallID: toolCallID,
-							ToolName:   part.FunctionCall.Name,
-							Input:      input,
+							ToolCallID:       toolCallID,
+							ToolName:         part.FunctionCall.Name,
+							Input:            input,
+							ProviderMetadata: googleThoughtSignatureMetadata(part.ThoughtSignature),
 						})
 					case part.Text != "":
 						isThought := part.Thought != nil && *part.Thought
@@ -736,6 +738,15 @@ func extractGoogleThoughtSignature(meta map[string]any) string {
 	}
 	sig, _ := gm["thoughtSignature"].(string)
 	return sig
+}
+
+func googleThoughtSignatureMetadata(sig string) map[string]any {
+	if sig == "" {
+		return nil
+	}
+	return map[string]any{
+		"google": map[string]any{"thoughtSignature": sig},
+	}
 }
 
 func classifyError(err error) *sdk.ProviderTestResult {

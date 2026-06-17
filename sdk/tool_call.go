@@ -1,9 +1,10 @@
 package sdk
 
 type ToolCall struct {
-	ToolCallID string `json:"toolCallId"`
-	ToolName   string `json:"toolName"`
-	Input      any    `json:"input"`
+	ToolCallID       string         `json:"toolCallId"`
+	ToolName         string         `json:"toolName"`
+	Input            any            `json:"input"`
+	ProviderMetadata map[string]any `json:"providerMetadata,omitempty"`
 }
 
 type ToolResult struct {

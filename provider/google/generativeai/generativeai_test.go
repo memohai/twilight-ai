@@ -184,6 +184,7 @@ func TestDoGenerate_ToolCall(t *testing.T) {
 							"name": "get_weather",
 							"args": map[string]any{"location": "Beijing"},
 						},
+						"thoughtSignature": "sig-generate",
 					}},
 				},
 				"finishReason": "STOP",
@@ -240,6 +241,13 @@ func TestDoGenerate_ToolCall(t *testing.T) {
 	if input["location"] != "Beijing" {
 		t.Errorf("location: got %v", input["location"])
 	}
+	googleMeta, ok := tc.ProviderMetadata["google"].(map[string]any)
+	if !ok {
+		t.Fatalf("tool call provider metadata = %#v, want google map", tc.ProviderMetadata)
+	}
+	if googleMeta["thoughtSignature"] != "sig-generate" {
+		t.Fatalf("thoughtSignature = %#v, want sig-generate", googleMeta["thoughtSignature"])
+	}
 }
 
 func TestDoGenerate_ToolCallMultiTurn(t *testing.T) {
@@ -261,6 +269,7 @@ func TestDoGenerate_ToolCallMultiTurn(t *testing.T) {
 					Name string `json:"name"`
 					Args any    `json:"args"`
 				} `json:"functionCall,omitempty"`
+				ThoughtSignature string `json:"thoughtSignature,omitempty"`
 			} `json:"parts"`
 		}
 		json.Unmarshal(body.Contents[1], &modelMsg)
@@ -269,6 +278,9 @@ func TestDoGenerate_ToolCallMultiTurn(t *testing.T) {
 		}
 		if len(modelMsg.Parts) != 1 || modelMsg.Parts[0].FunctionCall == nil {
 			t.Errorf("msg[1] should have functionCall part")
+		}
+		if modelMsg.Parts[0].ThoughtSignature != "sig-multiturn" {
+			t.Errorf("msg[1] thoughtSignature: got %q, want sig-multiturn", modelMsg.Parts[0].ThoughtSignature)
 		}
 
 		// verify tool result message has functionResponse
@@ -323,6 +335,9 @@ func TestDoGenerate_ToolCallMultiTurn(t *testing.T) {
 					ToolCallID: "call_abc",
 					ToolName:   "get_weather",
 					Input:      map[string]any{"location": "Beijing"},
+					ProviderMetadata: map[string]any{
+						"google": map[string]any{"thoughtSignature": "sig-multiturn"},
+					},
 				}},
 			},
 			{
@@ -630,7 +645,7 @@ func TestDoStream_ToolCall(t *testing.T) {
 		flusher := w.(http.Flusher)
 
 		chunks := []string{
-			`{"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"get_weather","args":{"location":"Tokyo"}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"totalTokenCount":15}}`,
+			`{"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"name":"get_weather","args":{"location":"Tokyo"}},"thoughtSignature":"sig-tool"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"totalTokenCount":15}}`,
 		}
 		for _, c := range chunks {
 			fmt.Fprintf(w, "data: %s\n\n", c)
@@ -704,6 +719,13 @@ func TestDoStream_ToolCall(t *testing.T) {
 	}
 	if !gotFinish {
 		t.Error("missing FinishPart")
+	}
+	googleMeta, ok := gotToolCall.ProviderMetadata["google"].(map[string]any)
+	if !ok {
+		t.Fatalf("tool call provider metadata = %#v, want google map", gotToolCall.ProviderMetadata)
+	}
+	if googleMeta["thoughtSignature"] != "sig-tool" {
+		t.Fatalf("thoughtSignature = %#v, want sig-tool", googleMeta["thoughtSignature"])
 	}
 }
 
