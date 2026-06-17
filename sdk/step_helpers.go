@@ -57,11 +57,7 @@ func buildStepMessages(text, reasoning string, reasoningMeta map[string]any, too
 		assistantParts = append(assistantParts, TextPart{Text: text})
 	}
 	for _, tc := range toolCalls {
-		assistantParts = append(assistantParts, ToolCallPart{
-			ToolCallID: tc.ToolCallID,
-			ToolName:   tc.ToolName,
-			Input:      tc.Input,
-		})
+		assistantParts = append(assistantParts, ToolCallPart(tc))
 	}
 
 	msgs := []Message{{Role: MessageRoleAssistant, Content: assistantParts, Usage: usage}}

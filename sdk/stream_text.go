@@ -81,9 +81,10 @@ func (c *Client) StreamText(ctx context.Context, options ...GenerateOption) (*St
 					}
 				case *StreamToolCallPart:
 					stepToolCalls = append(stepToolCalls, ToolCall{
-						ToolCallID: p.ToolCallID,
-						ToolName:   p.ToolName,
-						Input:      p.Input,
+						ToolCallID:       p.ToolCallID,
+						ToolName:         p.ToolName,
+						Input:            p.Input,
+						ProviderMetadata: p.ProviderMetadata,
 					})
 				case *FinishStepPart:
 					stepUsage = p.Usage

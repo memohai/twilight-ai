@@ -111,9 +111,10 @@ func (p *ToolInputEndPart) Type() StreamPartType { return StreamPartTypeToolInpu
 // --- Tool Execution ---
 
 type StreamToolCallPart struct {
-	ToolCallID string
-	ToolName   string
-	Input      any
+	ToolCallID       string
+	ToolName         string
+	Input            any
+	ProviderMetadata map[string]any
 }
 
 func (p *StreamToolCallPart) Type() StreamPartType { return StreamPartTypeToolCall }
@@ -264,9 +265,10 @@ func (sr *StreamResult) ToResult() (*GenerateResult, error) {
 			reasoning += p.Text
 		case *StreamToolCallPart:
 			result.ToolCalls = append(result.ToolCalls, ToolCall{
-				ToolCallID: p.ToolCallID,
-				ToolName:   p.ToolName,
-				Input:      p.Input,
+				ToolCallID:       p.ToolCallID,
+				ToolName:         p.ToolName,
+				Input:            p.Input,
+				ProviderMetadata: p.ProviderMetadata,
 			})
 		case *StreamToolResultPart:
 			result.ToolResults = append(result.ToolResults, ToolResult{
