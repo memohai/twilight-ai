@@ -17,7 +17,7 @@ A lightweight, idiomatic AI SDK for Go — inspired by [Vercel AI SDK](https://s
 - **Rich message types** — text, images, files, reasoning content, tool calls/results
 - **Embeddings** — generate embeddings with `Embed` / `EmbedMany`, supports OpenAI and Google providers
 - **Image generation** — generate and edit images with `GenerateImage` / `EditImage`, supports dall-e-2, dall-e-3, and gpt-image-1
-- **Video generation** — create, poll, and download video jobs with OpenRouter, Ark/ModelArk, and OpenAI Sora providers
+- **Video generation** — create, poll, and download video jobs with OpenRouter and Ark/ModelArk providers
 - **Speech synthesis** — generate speech with `GenerateSpeech` / `StreamSpeech`, supports Edge TTS with an open provider model
 - **Approval flow** — optional human-in-the-loop approval for sensitive tool calls
 
