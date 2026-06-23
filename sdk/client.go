@@ -60,4 +60,26 @@ func EditImage(ctx context.Context, options ...ImageEditOption) (*ImageResult, e
 	return defaultClient.EditImage(ctx, options...)
 }
 
+// --- Video convenience functions ---
+
+func CreateVideo(ctx context.Context, options ...VideoOption) (*VideoJob, error) {
+	return defaultClient.CreateVideo(ctx, options...)
+}
+
+func GetVideo(ctx context.Context, model *VideoModel, id string) (*VideoJob, error) {
+	return defaultClient.GetVideo(ctx, model, id)
+}
+
+func CancelVideo(ctx context.Context, model *VideoModel, id string) error {
+	return defaultClient.CancelVideo(ctx, model, id)
+}
+
+func DownloadVideo(ctx context.Context, model *VideoModel, output VideoOutput) (data []byte, contentType string, err error) {
+	return defaultClient.DownloadVideo(ctx, model, output)
+}
+
+func GenerateVideo(ctx context.Context, options ...VideoOption) (*VideoResult, error) {
+	return defaultClient.GenerateVideo(ctx, options...)
+}
+
 var defaultClient = &Client{}
