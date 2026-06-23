@@ -74,7 +74,7 @@ func CancelVideo(ctx context.Context, model *VideoModel, id string) error {
 	return defaultClient.CancelVideo(ctx, model, id)
 }
 
-func DownloadVideo(ctx context.Context, model *VideoModel, output VideoOutput) ([]byte, string, error) {
+func DownloadVideo(ctx context.Context, model *VideoModel, output VideoOutput) (data []byte, contentType string, err error) {
 	return defaultClient.DownloadVideo(ctx, model, output)
 }
 

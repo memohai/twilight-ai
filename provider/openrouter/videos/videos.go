@@ -62,7 +62,8 @@ func (p *Provider) ListModels(ctx context.Context) ([]*sdk.VideoModel, error) {
 		return nil, fmt.Errorf("openrouter videos: list models request failed: %w", err)
 	}
 	models := make([]*sdk.VideoModel, 0, len(resp.Data))
-	for _, item := range resp.Data {
+	for i := range resp.Data {
+		item := &resp.Data[i]
 		models = append(models, &sdk.VideoModel{
 			ID:       item.ID,
 			Provider: p,
@@ -85,6 +86,7 @@ func (p *Provider) ListModels(ctx context.Context) ([]*sdk.VideoModel, error) {
 	return models, nil
 }
 
+//nolint:gocritic // VideoProvider keeps VideoParams value-based for a stable public SDK contract.
 func (p *Provider) DoCreate(ctx context.Context, params sdk.VideoParams) (*sdk.VideoJob, error) {
 	if params.Model == nil {
 		return nil, fmt.Errorf("openrouter videos: model is required")
@@ -101,7 +103,7 @@ func (p *Provider) DoCreate(ctx context.Context, params sdk.VideoParams) (*sdk.V
 		Size:          params.Size,
 	}
 	if params.InputImage != nil {
-		if url := mediaURL(*params.InputImage); url != "" {
+		if url := mediaURL(params.InputImage); url != "" {
 			req.FrameImages = append(req.FrameImages, frameImage{
 				Type:      "image_url",
 				FrameType: "first_frame",
@@ -109,18 +111,18 @@ func (p *Provider) DoCreate(ctx context.Context, params sdk.VideoParams) (*sdk.V
 			})
 		}
 	}
-	for _, input := range params.ReferenceImages {
-		if url := mediaURL(input); url != "" {
+	for i := range params.ReferenceImages {
+		if url := mediaURL(&params.ReferenceImages[i]); url != "" {
 			req.InputReferences = append(req.InputReferences, inputReference{Type: "image_url", ImageURL: &mediaURLObject{URL: url}})
 		}
 	}
-	for _, input := range params.ReferenceAudio {
-		if url := mediaURL(input); url != "" {
+	for i := range params.ReferenceAudio {
+		if url := mediaURL(&params.ReferenceAudio[i]); url != "" {
 			req.InputReferences = append(req.InputReferences, inputReference{Type: "audio_url", AudioURL: &mediaURLObject{URL: url}})
 		}
 	}
-	for _, input := range params.ReferenceVideos {
-		if url := mediaURL(input); url != "" {
+	for i := range params.ReferenceVideos {
+		if url := mediaURL(&params.ReferenceVideos[i]); url != "" {
 			req.InputReferences = append(req.InputReferences, inputReference{Type: "video_url", VideoURL: &mediaURLObject{URL: url}})
 		}
 	}
@@ -162,7 +164,7 @@ func (p *Provider) DoCancel(_ context.Context, _ *sdk.VideoModel, _ string) erro
 	return fmt.Errorf("openrouter videos: cancel is not supported")
 }
 
-func (p *Provider) DoDownload(ctx context.Context, _ *sdk.VideoModel, output sdk.VideoOutput) ([]byte, string, error) {
+func (p *Provider) DoDownload(ctx context.Context, _ *sdk.VideoModel, output sdk.VideoOutput) (data []byte, contentType string, err error) {
 	if output.URL == "" {
 		return nil, "", fmt.Errorf("openrouter videos: output URL is required")
 	}
@@ -179,11 +181,11 @@ func (p *Provider) DoDownload(ctx context.Context, _ *sdk.VideoModel, output sdk
 		body, _ := io.ReadAll(resp.Body)
 		return nil, "", fmt.Errorf("openrouter videos: download failed with status %d: %s", resp.StatusCode, string(body))
 	}
-	data, err := io.ReadAll(resp.Body)
+	data, err = io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, "", fmt.Errorf("openrouter videos: read download response: %w", err)
 	}
-	contentType := resp.Header.Get("Content-Type")
+	contentType = resp.Header.Get("Content-Type")
 	if contentType == "" {
 		contentType = output.ContentType
 	}
@@ -239,7 +241,10 @@ func mapStatus(status string) sdk.VideoJobStatus {
 	}
 }
 
-func mediaURL(input sdk.MediaInput) string {
+func mediaURL(input *sdk.MediaInput) string {
+	if input == nil {
+		return ""
+	}
 	if input.URL != "" {
 		return input.URL
 	}

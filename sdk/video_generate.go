@@ -58,12 +58,12 @@ func WithVideoCallbackURL(url string) VideoOption {
 	return func(c *videoConfig) { c.Params.CallbackURL = url }
 }
 
-func WithVideoInputImage(input MediaInput) VideoOption {
-	return func(c *videoConfig) { c.Params.InputImage = &input }
+func WithVideoInputImage(input *MediaInput) VideoOption {
+	return func(c *videoConfig) { c.Params.InputImage = input }
 }
 
-func WithVideoInputVideo(input MediaInput) VideoOption {
-	return func(c *videoConfig) { c.Params.InputVideo = &input }
+func WithVideoInputVideo(input *MediaInput) VideoOption {
+	return func(c *videoConfig) { c.Params.InputVideo = input }
 }
 
 func WithVideoReferenceImages(inputs ...MediaInput) VideoOption {
@@ -159,7 +159,7 @@ func (c *Client) CancelVideo(ctx context.Context, model *VideoModel, id string) 
 }
 
 // DownloadVideo downloads a provider output and returns bytes plus content type.
-func (c *Client) DownloadVideo(ctx context.Context, model *VideoModel, output VideoOutput) ([]byte, string, error) {
+func (c *Client) DownloadVideo(ctx context.Context, model *VideoModel, output VideoOutput) (data []byte, contentType string, err error) {
 	prov, err := videoProviderFromModel(model)
 	if err != nil {
 		return nil, "", err

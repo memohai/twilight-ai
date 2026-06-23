@@ -56,11 +56,12 @@ func (p *Provider) ListModels(context.Context) ([]*sdk.VideoModel, error) {
 	return []*sdk.VideoModel{}, nil
 }
 
+//nolint:gocritic // VideoProvider keeps VideoParams value-based for a stable public SDK contract.
 func (p *Provider) DoCreate(ctx context.Context, params sdk.VideoParams) (*sdk.VideoJob, error) {
 	if params.Model == nil {
 		return nil, fmt.Errorf("ark videos: model is required")
 	}
-	body := p.buildCreateBody(params)
+	body := p.buildCreateBody(&params)
 	resp, err := utils.FetchJSON[map[string]any](ctx, p.httpClient, &utils.RequestOptions{
 		Method:  http.MethodPost,
 		BaseURL: p.baseURL,
@@ -105,7 +106,7 @@ func (p *Provider) DoCancel(ctx context.Context, _ *sdk.VideoModel, id string) e
 	return nil
 }
 
-func (p *Provider) DoDownload(ctx context.Context, _ *sdk.VideoModel, output sdk.VideoOutput) ([]byte, string, error) {
+func (p *Provider) DoDownload(ctx context.Context, _ *sdk.VideoModel, output sdk.VideoOutput) (data []byte, contentType string, err error) {
 	if output.URL == "" {
 		return nil, "", fmt.Errorf("ark videos: output URL is required")
 	}
@@ -130,11 +131,11 @@ func (p *Provider) DoDownload(ctx context.Context, _ *sdk.VideoModel, output sdk
 		body, _ := io.ReadAll(resp.Body)
 		return nil, "", fmt.Errorf("ark videos: download failed with status %d: %s", resp.StatusCode, string(body))
 	}
-	data, err := io.ReadAll(resp.Body)
+	data, err = io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, "", fmt.Errorf("ark videos: read download response: %w", err)
 	}
-	contentType := resp.Header.Get("Content-Type")
+	contentType = resp.Header.Get("Content-Type")
 	if contentType == "" {
 		contentType = output.ContentType
 	}
@@ -144,7 +145,7 @@ func (p *Provider) DoDownload(ctx context.Context, _ *sdk.VideoModel, output sdk
 	return data, contentType, nil
 }
 
-func (p *Provider) buildCreateBody(params sdk.VideoParams) map[string]any {
+func (p *Provider) buildCreateBody(params *sdk.VideoParams) map[string]any {
 	body := map[string]any{
 		"model":   params.Model.ID,
 		"content": buildContent(params),
@@ -173,43 +174,40 @@ func (p *Provider) buildCreateBody(params sdk.VideoParams) map[string]any {
 	return body
 }
 
-func buildContent(params sdk.VideoParams) []map[string]any {
+func buildContent(params *sdk.VideoParams) []map[string]any {
 	content := []map[string]any{{"type": "text", "text": params.Prompt}}
 	if params.InputImage != nil {
-		if url := mediaURL(*params.InputImage); url != "" {
-			content = append(content, mediaItem("image_url", "image_url", url, "first_frame"))
+		if url := mediaURL(params.InputImage); url != "" {
+			content = append(content, mediaItem("image_url", url, "first_frame"))
 		}
 	}
 	if params.InputVideo != nil {
-		if url := mediaURL(*params.InputVideo); url != "" {
-			content = append(content, mediaItem("video_url", "video_url", url, "input_video"))
+		if url := mediaURL(params.InputVideo); url != "" {
+			content = append(content, mediaItem("video_url", url, "input_video"))
 		}
 	}
-	for _, input := range params.ReferenceImages {
-		if url := mediaURL(input); url != "" {
-			content = append(content, mediaItem("image_url", "image_url", url, "reference_image"))
+	for i := range params.ReferenceImages {
+		if url := mediaURL(&params.ReferenceImages[i]); url != "" {
+			content = append(content, mediaItem("image_url", url, "reference_image"))
 		}
 	}
-	for _, input := range params.ReferenceVideos {
-		if url := mediaURL(input); url != "" {
-			content = append(content, mediaItem("video_url", "video_url", url, "reference_video"))
+	for i := range params.ReferenceVideos {
+		if url := mediaURL(&params.ReferenceVideos[i]); url != "" {
+			content = append(content, mediaItem("video_url", url, "reference_video"))
 		}
 	}
-	for _, input := range params.ReferenceAudio {
-		if url := mediaURL(input); url != "" {
-			content = append(content, mediaItem("audio_url", "audio_url", url, "reference_audio"))
+	for i := range params.ReferenceAudio {
+		if url := mediaURL(&params.ReferenceAudio[i]); url != "" {
+			content = append(content, mediaItem("audio_url", url, "reference_audio"))
 		}
 	}
 	return content
 }
 
-func mediaItem(itemType, field, url, role string) map[string]any {
+func mediaItem(field, url, role string) map[string]any {
 	item := map[string]any{
 		"type": field,
 		field:  map[string]any{"url": url},
-	}
-	if itemType != field {
-		item["type"] = itemType
 	}
 	if role != "" {
 		item["role"] = role
@@ -278,7 +276,10 @@ func mapStatus(status string) sdk.VideoJobStatus {
 	}
 }
 
-func mediaURL(input sdk.MediaInput) string {
+func mediaURL(input *sdk.MediaInput) string {
+	if input == nil {
+		return ""
+	}
 	if input.URL != "" {
 		return input.URL
 	}
