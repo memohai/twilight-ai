@@ -439,6 +439,13 @@ if testResult.Supported {
 | OpenAI Embeddings | `embedding.New()` | `/embeddings` | ✅ Stable |
 | Google Embeddings | `embedding.New()` | `embedContent` / `batchEmbedContents` | ✅ Stable |
 | Edge TTS | `speech.New()` | Bing WebSocket | ✅ Stable |
+| OpenAI / compatible TTS | `speech.New()` | `/audio/speech` | ✅ Stable |
+| Deepgram TTS | `speech.New()` | `/v1/speak` | ✅ Stable |
+| ElevenLabs TTS | `speech.New()` | `/v1/text-to-speech/{voice_id}` | ✅ Stable |
+| MiniMax TTS | `speech.New()` | `/v1/t2a_v2` | ✅ Stable |
+| MiMo TTS | `speech.New()` | `/chat/completions` + audio output | ✅ Stable |
+| Alibaba Cloud CosyVoice | `speech.New()` | DashScope WebSocket | ✅ Stable |
+| Volcengine SAMI TTS | `speech.New()` | `/api/v1/invoke` | ✅ Stable |
 
 ## License
 

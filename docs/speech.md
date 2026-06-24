@@ -276,6 +276,37 @@ result, err := sdk.GenerateSpeech(ctx,
 )
 ```
 
+## MiMo TTS Provider
+
+The `provider/mimo/speech` package targets Xiaomi MiMo's `/chat/completions` audio output. Non-streaming responses return base64 audio directly, while streaming responses emit PCM chunks that the provider repackages as WAV for callers.
+
+```go
+import "github.com/memohai/twilight-ai/provider/mimo/speech"
+
+provider := speech.New(
+    speech.WithAPIKey("your-mimo-api-key"),
+)
+model := provider.SpeechModel("mimo-v2.5-tts")
+
+result, err := sdk.GenerateSpeech(ctx,
+    sdk.WithSpeechModel(model),
+    sdk.WithText("Hello from MiMo speech."),
+    sdk.WithSpeechConfig(map[string]any{
+        "voice":        "mimo_default",
+        "format":       "wav",
+        "style_prompt": "Warm, calm narration.",
+    }),
+)
+```
+
+Supported config keys:
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `voice` | `string` | `mimo_default` | MiMo preset voice ID |
+| `format` | `string` | `wav` | Output format for non-streaming synthesis (`wav` or `pcm16`) |
+| `style_prompt` | `string` | `""` | Optional style prompt prepended to the request |
+
 ## Alibaba Cloud DashScope CosyVoice Provider
 
 The `provider/alibabacloud/speech` package implements the WebSocket-based DashScope CosyVoice API. The provider connects to `wss://dashscope.aliyuncs.com/api-ws/v1/inference/` with Bearer auth and uses the `run-task` → `continue-task` → `finish-task` message sequence.
