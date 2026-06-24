@@ -275,10 +275,21 @@ func buildWAV(pcm []byte, sampleRate uint32) []byte {
 		numChannels   = uint32(1)
 		bitsPerSample = uint32(16)
 	)
+	const maxUint32 = ^uint32(0)
+
 	byteRate := sampleRate * numChannels * bitsPerSample / 8
 	blockAlign := uint16(numChannels * bitsPerSample / 8)
-	dataSize := uint32(len(pcm))
-	chunkSize := uint32(36) + dataSize
+	dataSize64 := uint64(len(pcm))
+	dataSize := maxUint32
+	if dataSize64 <= uint64(maxUint32) {
+		dataSize = uint32(dataSize64)
+	}
+
+	chunkSize64 := uint64(36) + dataSize64
+	chunkSize := maxUint32
+	if chunkSize64 <= uint64(maxUint32) {
+		chunkSize = uint32(chunkSize64)
+	}
 
 	buf := new(bytes.Buffer)
 	_, _ = buf.WriteString("RIFF")
