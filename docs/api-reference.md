@@ -166,7 +166,8 @@ type MessagePart interface {
 
 ```go
 type TextPart struct {
-    Text string
+    Text         string
+    CacheControl *CacheControl  // optional, Anthropic only
 }
 
 type ReasoningPart struct {
@@ -175,31 +176,48 @@ type ReasoningPart struct {
 }
 
 type ImagePart struct {
-    Image     string  // URL or base64
-    MediaType string  // optional, e.g. "image/png"
+    Image        string  // URL or base64
+    MediaType    string  // optional, e.g. "image/png"
+    CacheControl *CacheControl  // optional, Anthropic only
 }
 
 type FilePart struct {
-    Data      string
-    MediaType string  // optional
-    Filename  string  // optional
+    Data         string
+    MediaType    string  // optional
+    Filename     string  // optional
+    CacheControl *CacheControl  // optional, Anthropic only
 }
 
 type ToolCallPart struct {
-    ToolCallID string
-    ToolName   string
-    Input      any
+    ToolCallID   string
+    ToolName     string
+    Input        any
+    CacheControl *CacheControl  // optional, Anthropic only
 }
 
 type ToolResultPart struct {
-    ToolCallID string
-    ToolName   string
-    Result     any
-    IsError    bool   // optional
+    ToolCallID   string
+    ToolName     string
+    Result       any
+    IsError      bool   // optional
+    CacheControl *CacheControl  // optional, Anthropic only
 }
 ```
 
 `Message` supports full JSON serialization with automatic type discrimination.
+
+#### CacheControl
+
+`CacheControl` marks a content block as a prompt-caching breakpoint. It is
+honored only by the Anthropic provider; other providers ignore it. See
+[Prompt Caching](./providers.md#prompt-caching) for placement guidance.
+
+```go
+type CacheControl struct {
+    Type string  // "ephemeral"
+    TTL  string  // "" (5-minute default) | "1h"
+}
+```
 
 ---
 
@@ -335,6 +353,7 @@ type Tool struct {
     Parameters      any              // JSON Schema
     Execute         ToolExecuteFunc
     RequireApproval bool
+    CacheControl    *CacheControl    // optional, Anthropic only — caches tool definitions
 }
 
 type ToolExecuteFunc func(ctx *ToolExecContext, input any) (any, error)
@@ -499,8 +518,11 @@ type Usage struct {
 }
 
 type InputTokenDetail struct {
-    CacheReadTokens    int
-    CacheCreationTokens int
+    NoCacheTokens      int
+    CacheReadTokens    int  // tokens served from cache
+    CacheWriteTokens   int  // tokens written to cache
+    CacheWrite5mTokens int  // Anthropic: written to the 5-minute cache
+    CacheWrite1hTokens int  // Anthropic: written to the 1-hour cache (ttl="1h")
 }
 
 type OutputTokenDetail struct {

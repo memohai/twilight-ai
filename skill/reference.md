@@ -121,7 +121,8 @@ type MessagePart interface {
 }
 
 type TextPart struct {
-    Text string
+    Text         string
+    CacheControl *CacheControl  // optional, Anthropic only
 }
 
 type ReasoningPart struct {
@@ -130,27 +131,37 @@ type ReasoningPart struct {
 }
 
 type ImagePart struct {
-    Image     string
-    MediaType string
+    Image        string
+    MediaType    string
+    CacheControl *CacheControl  // optional, Anthropic only
 }
 
 type FilePart struct {
-    Data      string
-    MediaType string
-    Filename  string
+    Data         string
+    MediaType    string
+    Filename     string
+    CacheControl *CacheControl  // optional, Anthropic only
 }
 
 type ToolCallPart struct {
-    ToolCallID string
-    ToolName   string
-    Input      any
+    ToolCallID   string
+    ToolName     string
+    Input        any
+    CacheControl *CacheControl  // optional, Anthropic only
 }
 
 type ToolResultPart struct {
-    ToolCallID string
-    ToolName   string
-    Result     any
-    IsError    bool
+    ToolCallID   string
+    ToolName     string
+    Result       any
+    IsError      bool
+    CacheControl *CacheControl  // optional, Anthropic only
+}
+
+// CacheControl marks a content block as an Anthropic prompt-caching breakpoint.
+type CacheControl struct {
+    Type string  // "ephemeral"
+    TTL  string  // "" (5-minute default) | "1h"
 }
 
 type Message struct {
@@ -294,6 +305,7 @@ type Tool struct {
     Parameters      any
     Execute         ToolExecuteFunc
     RequireApproval bool
+    CacheControl    *CacheControl  // optional, Anthropic only
 }
 
 func NewTool[T any](
@@ -536,8 +548,11 @@ type Usage struct {
 }
 
 type InputTokenDetail struct {
-    CacheReadTokens     int
-    CacheCreationTokens int
+    NoCacheTokens      int
+    CacheReadTokens    int
+    CacheWriteTokens   int
+    CacheWrite5mTokens int  // Anthropic: 5-minute cache writes
+    CacheWrite1hTokens int  // Anthropic: 1-hour cache writes (ttl="1h")
 }
 
 type OutputTokenDetail struct {

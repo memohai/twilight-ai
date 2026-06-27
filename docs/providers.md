@@ -543,6 +543,36 @@ provider := messages.New(
 
 When enabled, the model's internal reasoning appears in `result.Reasoning` (non-streaming) or as `ReasoningStartPart` / `ReasoningDeltaPart` / `ReasoningEndPart` events (streaming).
 
+### Prompt Caching
+
+Claude supports [prompt caching](https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching): attach a `*sdk.CacheControl` breakpoint to a content block, and Anthropic caches the entire prefix up to and including it. Caching is a prefix match — a byte change anywhere before a breakpoint invalidates it — so place breakpoints at the end of stable content. Up to 4 breakpoints per request.
+
+`CacheControl` is honored on system, user, assistant, and tool-result content blocks, and on tool definitions. Other providers ignore it.
+
+```go
+// Cache a large, stable system prompt and the tool list.
+msgs := []sdk.Message{
+    {Role: sdk.MessageRoleSystem, Content: []sdk.MessagePart{
+        sdk.TextPart{Text: largeSystemPrompt, CacheControl: &sdk.CacheControl{Type: "ephemeral"}},
+    }},
+    sdk.UserMessage("..."),
+}
+
+tools := []sdk.Tool{
+    {Name: "search", Parameters: searchSchema},
+    // Breakpoint on the last tool caches all tool definitions above it.
+    {Name: "calc", Parameters: calcSchema, CacheControl: &sdk.CacheControl{Type: "ephemeral"}},
+}
+```
+
+For multi-turn and agentic flows, move the breakpoint forward to the last block of the most recently settled turn so the growing prefix is reused on the next request — a trailing tool result, or the assistant's text / tool call:
+
+```go
+sdk.ToolResultPart{ToolCallID: id, Result: out, CacheControl: &sdk.CacheControl{Type: "ephemeral"}}
+```
+
+Set `TTL: "1h"` for a 1-hour cache (higher write rate; the default empty TTL is 5 minutes). Cache activity is reported on `result.Usage`: `CachedInputTokens` (read), and under `InputTokenDetails`, `CacheReadTokens` / `CacheWriteTokens` with the per-TTL split in `CacheWrite5mTokens` / `CacheWrite1hTokens`.
+
 ### Supported Features
 
 | Feature | Supported |
@@ -552,6 +582,7 @@ When enabled, the model's internal reasoning appears in `result.Reasoning` (non-
 | Tool/function calling | ✅ |
 | Vision (image inputs) | ✅ |
 | Extended thinking | ✅ |
+| Prompt caching (`cache_control`) | ✅ |
 | Token usage reporting | ✅ |
 | Cached token details | ✅ |
 | ListModels / Test / TestModel | ✅ |

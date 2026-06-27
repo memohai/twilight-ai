@@ -1185,6 +1185,256 @@ func TestDoGenerate_CacheControl_Tools(t *testing.T) {
 	}
 }
 
+func TestDoGenerate_CacheControl_ToolResultBlock(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content []struct {
+					Type         string `json:"type"`
+					ToolUseID    string `json:"tool_use_id,omitempty"`
+					CacheControl *struct {
+						Type string `json:"type"`
+						TTL  string `json:"ttl,omitempty"`
+					} `json:"cache_control,omitempty"`
+				} `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+
+		var result *struct {
+			Type         string
+			CacheControl *struct {
+				Type string `json:"type"`
+				TTL  string `json:"ttl,omitempty"`
+			}
+		}
+		for _, msg := range body.Messages {
+			for _, block := range msg.Content {
+				if block.Type == "tool_result" && block.ToolUseID == "toolu_1" {
+					result = &struct {
+						Type         string
+						CacheControl *struct {
+							Type string `json:"type"`
+							TTL  string `json:"ttl,omitempty"`
+						}
+					}{Type: block.Type, CacheControl: block.CacheControl}
+				}
+			}
+		}
+		if result == nil {
+			t.Fatal("expected a tool_result block for toolu_1, got none")
+		}
+		if result.CacheControl == nil {
+			t.Fatal("expected cache_control on tool_result block, got nil")
+		}
+		if result.CacheControl.Type != "ephemeral" {
+			t.Errorf("tool_result cache_control type: got %q, want ephemeral", result.CacheControl.Type)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id": "msg_cc_tr", "type": "message", "model": "claude-sonnet-4-20250514", "role": "assistant",
+			"content":     []map[string]any{{"type": "text", "text": "Done"}},
+			"stop_reason": "end_turn",
+			"usage":       map[string]any{"input_tokens": 40, "output_tokens": 2},
+		})
+	}))
+	defer srv.Close()
+
+	p := messages.New(messages.WithAPIKey("k"), messages.WithBaseURL(srv.URL))
+	_, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model: &sdk.Model{ID: "claude-sonnet-4-20250514"},
+		Messages: []sdk.Message{
+			sdk.UserMessage("search for cats"),
+			{
+				Role: sdk.MessageRoleAssistant,
+				Content: []sdk.MessagePart{
+					sdk.ToolCallPart{ToolCallID: "toolu_1", ToolName: "search", Input: map[string]any{"q": "cats"}},
+				},
+			},
+			{
+				Role: sdk.MessageRoleTool,
+				Content: []sdk.MessagePart{
+					sdk.ToolResultPart{
+						ToolCallID:   "toolu_1",
+						ToolName:     "search",
+						Result:       "found 10 results",
+						CacheControl: &sdk.CacheControl{Type: "ephemeral"},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate: %v", err)
+	}
+}
+
+func TestDoGenerate_CacheControl_AssistantToolUse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content []struct {
+					Type         string `json:"type"`
+					CacheControl *struct {
+						Type string `json:"type"`
+						TTL  string `json:"ttl,omitempty"`
+					} `json:"cache_control,omitempty"`
+				} `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+
+		var text, toolUse *struct {
+			Type         string `json:"type"`
+			CacheControl *struct {
+				Type string `json:"type"`
+				TTL  string `json:"ttl,omitempty"`
+			} `json:"cache_control,omitempty"`
+		}
+		for i := range body.Messages {
+			if body.Messages[i].Role != "assistant" {
+				continue
+			}
+			for j := range body.Messages[i].Content {
+				b := &body.Messages[i].Content[j]
+				switch b.Type {
+				case "text":
+					text = b
+				case "tool_use":
+					toolUse = b
+				}
+			}
+		}
+		if text == nil || toolUse == nil {
+			t.Fatalf("expected assistant text and tool_use blocks; text=%v toolUse=%v", text, toolUse)
+		}
+		if text.CacheControl != nil {
+			t.Error("assistant text block should not have cache_control")
+		}
+		if toolUse.CacheControl == nil {
+			t.Fatal("expected cache_control on assistant tool_use block, got nil")
+		}
+		if toolUse.CacheControl.Type != "ephemeral" {
+			t.Errorf("tool_use cache_control type: got %q, want ephemeral", toolUse.CacheControl.Type)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id": "msg_cc_atu", "type": "message", "model": "claude-sonnet-4-20250514", "role": "assistant",
+			"content":     []map[string]any{{"type": "text", "text": "ok"}},
+			"stop_reason": "end_turn",
+			"usage":       map[string]any{"input_tokens": 20, "output_tokens": 1},
+		})
+	}))
+	defer srv.Close()
+
+	p := messages.New(messages.WithAPIKey("k"), messages.WithBaseURL(srv.URL))
+	_, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model: &sdk.Model{ID: "claude-sonnet-4-20250514"},
+		Messages: []sdk.Message{
+			sdk.UserMessage("look it up"),
+			{
+				Role: sdk.MessageRoleAssistant,
+				Content: []sdk.MessagePart{
+					sdk.TextPart{Text: "Let me search."},
+					sdk.ToolCallPart{
+						ToolCallID:   "toolu_9",
+						ToolName:     "search",
+						Input:        map[string]any{"q": "x"},
+						CacheControl: &sdk.CacheControl{Type: "ephemeral"},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate: %v", err)
+	}
+}
+
+func TestDoGenerate_CacheControl_AssistantText(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content []struct {
+					Type         string `json:"type"`
+					CacheControl *struct {
+						Type string `json:"type"`
+						TTL  string `json:"ttl,omitempty"`
+					} `json:"cache_control,omitempty"`
+				} `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+
+		var assistantText *struct {
+			Type         string `json:"type"`
+			CacheControl *struct {
+				Type string `json:"type"`
+				TTL  string `json:"ttl,omitempty"`
+			} `json:"cache_control,omitempty"`
+		}
+		for i := range body.Messages {
+			if body.Messages[i].Role != "assistant" {
+				continue
+			}
+			for j := range body.Messages[i].Content {
+				if body.Messages[i].Content[j].Type == "text" {
+					assistantText = &body.Messages[i].Content[j]
+				}
+			}
+		}
+		if assistantText == nil {
+			t.Fatal("expected an assistant text block, got none")
+		}
+		if assistantText.CacheControl == nil {
+			t.Fatal("expected cache_control on assistant text block, got nil")
+		}
+		if assistantText.CacheControl.TTL != "1h" {
+			t.Errorf("assistant text cache_control ttl: got %q, want 1h", assistantText.CacheControl.TTL)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id": "msg_cc_at", "type": "message", "model": "claude-sonnet-4-20250514", "role": "assistant",
+			"content":     []map[string]any{{"type": "text", "text": "ok"}},
+			"stop_reason": "end_turn",
+			"usage":       map[string]any{"input_tokens": 15, "output_tokens": 1},
+		})
+	}))
+	defer srv.Close()
+
+	p := messages.New(messages.WithAPIKey("k"), messages.WithBaseURL(srv.URL))
+	_, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model: &sdk.Model{ID: "claude-sonnet-4-20250514"},
+		Messages: []sdk.Message{
+			sdk.UserMessage("hi"),
+			{
+				Role: sdk.MessageRoleAssistant,
+				Content: []sdk.MessagePart{
+					sdk.TextPart{
+						Text:         "A long, stable assistant answer worth caching.",
+						CacheControl: &sdk.CacheControl{Type: "ephemeral", TTL: "1h"},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate: %v", err)
+	}
+}
+
 func TestDoGenerate_CacheControl_DetailedUsage(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

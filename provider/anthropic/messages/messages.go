@@ -496,7 +496,11 @@ func convertAssistantMessage(msg sdk.Message) anthropicMessage {
 	for _, part := range msg.Content {
 		switch p := part.(type) {
 		case sdk.TextPart:
-			blocks = append(blocks, contentBlock{Type: blockTypeText, Text: p.Text})
+			block := contentBlock{Type: blockTypeText, Text: p.Text}
+			if p.CacheControl != nil {
+				block.CacheControl = &cacheControl{Type: p.CacheControl.Type, TTL: p.CacheControl.TTL}
+			}
+			blocks = append(blocks, block)
 		case sdk.ReasoningPart:
 			sig := extractAnthropicSignature(p.ProviderMetadata)
 			if sig == "" {
@@ -522,12 +526,16 @@ func convertAssistantMessage(msg sdk.Message) anthropicMessage {
 			if input == nil {
 				input = map[string]any{}
 			}
-			blocks = append(blocks, contentBlock{
+			block := contentBlock{
 				Type:  blockTypeToolUse,
 				ID:    id,
 				Name:  p.ToolName,
 				Input: input,
-			})
+			}
+			if p.CacheControl != nil {
+				block.CacheControl = &cacheControl{Type: p.CacheControl.Type, TTL: p.CacheControl.TTL}
+			}
+			blocks = append(blocks, block)
 		}
 	}
 
@@ -544,6 +552,9 @@ func convertToolResults(parts []sdk.MessagePart) []contentBlock {
 				ToolUseID: trp.ToolCallID,
 				Content:   string(content),
 				IsError:   trp.IsError,
+			}
+			if trp.CacheControl != nil {
+				block.CacheControl = &cacheControl{Type: trp.CacheControl.Type, TTL: trp.CacheControl.TTL}
 			}
 			blocks = append(blocks, block)
 		}
