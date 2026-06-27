@@ -84,6 +84,7 @@ type ToolCallPart struct {
 	ToolCallID       string         `json:"toolCallId"`
 	ToolName         string         `json:"toolName"`
 	Input            any            `json:"input"`
+	CacheControl     *CacheControl  `json:"cacheControl,omitempty"`
 	ProviderMetadata map[string]any `json:"providerMetadata,omitempty"`
 }
 
@@ -92,10 +93,11 @@ func (p ToolCallPart) PartType() MessagePartType { return MessagePartTypeToolCal
 // --- Tool Result (in tool messages) ---
 
 type ToolResultPart struct {
-	ToolCallID string `json:"toolCallId"`
-	ToolName   string `json:"toolName"`
-	Result     any    `json:"result"`
-	IsError    bool   `json:"isError,omitempty"`
+	ToolCallID   string        `json:"toolCallId"`
+	ToolName     string        `json:"toolName"`
+	Result       any           `json:"result"`
+	IsError      bool          `json:"isError,omitempty"`
+	CacheControl *CacheControl `json:"cacheControl,omitempty"`
 }
 
 func (p ToolResultPart) PartType() MessagePartType { return MessagePartTypeToolResult }
