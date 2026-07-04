@@ -40,6 +40,8 @@ func addUsage(total, step *Usage) Usage {
 	result.InputTokenDetails.NoCacheTokens += step.InputTokenDetails.NoCacheTokens
 	result.InputTokenDetails.CacheReadTokens += step.InputTokenDetails.CacheReadTokens
 	result.InputTokenDetails.CacheWriteTokens += step.InputTokenDetails.CacheWriteTokens
+	result.InputTokenDetails.CacheWrite5mTokens += step.InputTokenDetails.CacheWrite5mTokens
+	result.InputTokenDetails.CacheWrite1hTokens += step.InputTokenDetails.CacheWrite1hTokens
 	result.OutputTokenDetails.TextTokens += step.OutputTokenDetails.TextTokens
 	result.OutputTokenDetails.ReasoningTokens += step.OutputTokenDetails.ReasoningTokens
 	return result

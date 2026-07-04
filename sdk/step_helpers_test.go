@@ -2,6 +2,35 @@ package sdk
 
 import "testing"
 
+func TestAddUsageAccumulatesCacheWriteTTLDetails(t *testing.T) {
+	total := Usage{
+		InputTokenDetails: InputTokenDetail{
+			CacheWriteTokens:   100,
+			CacheWrite5mTokens: 70,
+			CacheWrite1hTokens: 30,
+		},
+	}
+	step := Usage{
+		InputTokenDetails: InputTokenDetail{
+			CacheWriteTokens:   200,
+			CacheWrite5mTokens: 120,
+			CacheWrite1hTokens: 80,
+		},
+	}
+
+	got := addUsage(&total, &step)
+
+	if got.InputTokenDetails.CacheWriteTokens != 300 {
+		t.Fatalf("CacheWriteTokens = %d, want 300", got.InputTokenDetails.CacheWriteTokens)
+	}
+	if got.InputTokenDetails.CacheWrite5mTokens != 190 {
+		t.Fatalf("CacheWrite5mTokens = %d, want 190", got.InputTokenDetails.CacheWrite5mTokens)
+	}
+	if got.InputTokenDetails.CacheWrite1hTokens != 110 {
+		t.Fatalf("CacheWrite1hTokens = %d, want 110", got.InputTokenDetails.CacheWrite1hTokens)
+	}
+}
+
 func TestBuildStepMessagesPreservesToolCallProviderMetadata(t *testing.T) {
 	meta := map[string]any{"google": map[string]any{"thoughtSignature": "sig-1"}}
 	msgs := buildStepMessages("", "", nil, []ToolCall{{
