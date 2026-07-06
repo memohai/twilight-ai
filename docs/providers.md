@@ -784,6 +784,58 @@ provider := images.New(
 
 See [Images](images.md) for complete documentation.
 
+### Alibaba Cloud DashScope Images Provider
+
+The `provider/alibabacloud/images` package provides image generation via Alibaba Cloud Model Studio (DashScope), supporting Qwen-Image and Wan image models.
+
+#### Basic Usage
+
+```go
+import (
+    "github.com/memohai/twilight-ai/provider/alibabacloud/images"
+    "github.com/memohai/twilight-ai/sdk"
+)
+
+provider := images.New(
+    images.WithAPIKey("sk-..."),
+)
+
+model := provider.GenerationModel("qwen-image-max")
+result, err := sdk.GenerateImage(ctx,
+    sdk.WithImageGenerationModel(model),
+    sdk.WithImagePrompt("A sunset over mountains"),
+    sdk.WithImageSize("1024x1024"),
+)
+// result.Data[0].URL contains the generated image URL
+```
+
+#### Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `WithAPIKey(key)` | `""` | DashScope / Model Studio API key sent as `Authorization: Bearer <key>` |
+| `WithBaseURL(url)` | `https://dashscope.aliyuncs.com/api/v1` | Base URL; also accepts Model Studio compatible-mode URLs, which are normalized to the native `/api/v1` base |
+| `WithHTTPClient(client)` | `&http.Client{}` | Custom HTTP client |
+| `WithPollInterval(d)` | `3s` | Polling interval for async image tasks |
+| `WithPollTimeout(d)` | `5m` | Maximum time to wait for an async image task |
+
+#### Endpoint Routing
+
+DashScope exposes several image APIs; the provider selects the endpoint from the model ID:
+
+| Models | Endpoint | Mode |
+|--------|----------|------|
+| `qwen-image`, `qwen-image-plus` | `/services/aigc/text2image/image-synthesis` | Async task + polling |
+| `wanx-*`, `wan2.0`–`wan2.5` | `/services/aigc/text2image/image-synthesis` | Async task + polling |
+| Other `qwen-image*` (e.g. `qwen-image-max`, `qwen-image-2.0-pro`, dated snapshots) | `/services/aigc/multimodal-generation/generation` | Synchronous |
+| Other `wan*` (e.g. `wan2.6-t2i` and newer) | `/services/aigc/image-generation/generation` | Async task + polling |
+
+Async tasks are polled via `GET /tasks/{task_id}` until they succeed, fail, or the poll timeout is reached.
+
+#### Parameters
+
+DashScope image models honor `Prompt`, `N`, and `Size` (converted from `"1024x1024"` to DashScope's `"1024*1024"` form). Other `ImageGenerationParams` fields are OpenAI-specific and ignored. Results are returned as image URLs, which expire after 24 hours — download them promptly.
+
 ---
 
 ## Embedding Providers
@@ -1367,7 +1419,7 @@ text, err := sdk.GenerateText(ctx,
 
 ## Next Steps
 
-- [Images](images.md) — generate and edit images with OpenAI image models
+- [Images](images.md) — generate and edit images with OpenAI and Alibaba Cloud DashScope image models
 - [Embeddings](embeddings.md) — generate vector embeddings with OpenAI and Google
 - [Speech](speech.md) — speech synthesis with Edge TTS and custom providers
 - [Tool Calling](tools.md) — define tools and enable multi-step execution

@@ -16,7 +16,7 @@ A lightweight, idiomatic AI SDK for Go — inspired by [Vercel AI SDK](https://s
 - **Multi-step execution** — automatic tool-call loop with configurable `MaxSteps`
 - **Rich message types** — text, images, files, reasoning content, tool calls/results
 - **Embeddings** — generate embeddings with `Embed` / `EmbedMany`, supports OpenAI and Google providers
-- **Image generation** — generate and edit images with `GenerateImage` / `EditImage`, supports dall-e-2, dall-e-3, and gpt-image-1
+- **Image generation** — generate and edit images with `GenerateImage` / `EditImage`, supports OpenAI (dall-e, gpt-image) and Alibaba Cloud DashScope (Qwen-Image, Wan) models
 - **Video generation** — create, poll, and download video jobs with OpenRouter and Ark/ModelArk providers
 - **Speech synthesis** — generate speech with `GenerateSpeech` / `StreamSpeech`, supports Edge TTS with an open provider model
 - **Approval flow** — optional human-in-the-loop approval for sensitive tool calls
@@ -305,6 +305,24 @@ result, err := sdk.EditImage(ctx,
 )
 ```
 
+Alibaba Cloud Model Studio (DashScope) image models work through the same API:
+
+```go
+import "github.com/memohai/twilight-ai/provider/alibabacloud/images"
+
+provider := images.New(images.WithAPIKey("sk-..."))
+model := provider.GenerationModel("qwen-image-max")
+
+result, err := sdk.GenerateImage(ctx,
+    sdk.WithImageGenerationModel(model),
+    sdk.WithImagePrompt("A sunset over mountains, oil painting style"),
+    sdk.WithImageSize("1024x1024"),
+)
+// result.Data[0].URL contains the generated image URL
+```
+
+The DashScope provider routes Qwen-Image and Wan models to the right endpoint automatically and transparently polls async generation tasks. See [Images](docs/images.md) for details.
+
 ### Embeddings
 
 Generate vector embeddings for text using OpenAI or Google:
@@ -417,7 +435,7 @@ if testResult.Supported {
 |----------|-------------|
 | [Getting Started](docs/getting-started.md) | Installation, setup, and first request |
 | [Providers](docs/providers.md) | Provider interface, OpenAI, Anthropic, and Google Gemini |
-| [Images](docs/images.md) | Generate and edit images with OpenAI image models |
+| [Images](docs/images.md) | Generate and edit images with OpenAI and Alibaba Cloud DashScope image models |
 | [Embeddings](docs/embeddings.md) | Generate vector embeddings with OpenAI and Google |
 | [Speech](docs/speech.md) | Speech synthesis with Edge TTS and custom providers |
 | [Tool Calling](docs/tools.md) | Defining local tools, MCP tools, multi-step execution, approval flow |
@@ -436,6 +454,7 @@ if testResult.Supported {
 | Anthropic | `messages.New()` | `/messages` | ✅ Stable |
 | Google Gemini | `generativeai.New()` | Generative AI API | ✅ Stable |
 | OpenAI Images | `images.New()` | `/images/generations`, `/images/edits` | ✅ Stable |
+| Alibaba Cloud DashScope Images | `images.New()` | DashScope text2image / multimodal-generation | ✅ Stable |
 | OpenAI Embeddings | `embedding.New()` | `/embeddings` | ✅ Stable |
 | Google Embeddings | `embedding.New()` | `embedContent` / `batchEmbedContents` | ✅ Stable |
 | Edge TTS | `speech.New()` | Bing WebSocket | ✅ Stable |
