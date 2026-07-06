@@ -203,6 +203,7 @@ func (p *Provider) buildRequest(params *sdk.GenerateParams) *responsesRequest {
 		Temperature:     params.Temperature,
 		TopP:            params.TopP,
 		MaxOutputTokens: params.MaxTokens,
+		PromptCacheKey:  params.PromptCacheKey,
 	}
 
 	if len(params.Tools) > 0 {

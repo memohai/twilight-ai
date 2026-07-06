@@ -79,6 +79,10 @@ func WithReasoningEffort(effort string) GenerateOption {
 	return func(c *generateConfig) { c.Params.ReasoningEffort = &effort }
 }
 
+func WithPromptCacheKey(key string) GenerateOption {
+	return func(c *generateConfig) { c.Params.PromptCacheKey = &key }
+}
+
 // --- Client-level orchestration options ---
 
 // WithMaxSteps sets the maximum number of LLM calls in the tool-execution loop.

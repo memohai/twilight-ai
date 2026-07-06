@@ -16,6 +16,7 @@ type chatRequest struct {
 	PresencePenalty     *float64           `json:"presence_penalty,omitempty"`
 	Seed                *int               `json:"seed,omitempty"`
 	ReasoningEffort     *string            `json:"reasoning_effort,omitempty"`
+	PromptCacheKey      *string            `json:"prompt_cache_key,omitempty"`
 	Thinking            *chatThinking      `json:"thinking,omitempty"`
 	ReasoningSplit      bool               `json:"reasoning_split,omitempty"`
 	Stream              bool               `json:"stream,omitempty"`

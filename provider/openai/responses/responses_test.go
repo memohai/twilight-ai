@@ -97,6 +97,102 @@ func TestResponsesDoGenerate(t *testing.T) {
 	}
 }
 
+func TestResponsesDoGenerate_PromptCacheKey(t *testing.T) {
+	var body struct {
+		PromptCacheKey *string `json:"prompt_cache_key"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&body)
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id":         "resp_test123",
+			"created_at": 1700000000,
+			"model":      "gpt-4o-mini",
+			"output": []map[string]any{{
+				"type": "message",
+				"id":   "msg_001",
+				"role": "assistant",
+				"content": []map[string]any{{
+					"type":        "output_text",
+					"text":        "Hello!",
+					"annotations": []any{},
+				}},
+			}},
+			"usage": map[string]any{
+				"input_tokens":  5,
+				"output_tokens": 2,
+			},
+		})
+	}))
+	defer srv.Close()
+
+	p := responses.New(
+		responses.WithAPIKey("test-key"),
+		responses.WithBaseURL(srv.URL),
+	)
+
+	key := "some-key"
+	_, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model:          p.ChatModel("gpt-4o-mini"),
+		Messages:       []sdk.Message{sdk.UserMessage("Hi")},
+		PromptCacheKey: &key,
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate: %v", err)
+	}
+
+	if body.PromptCacheKey == nil || *body.PromptCacheKey != "some-key" {
+		t.Errorf("prompt_cache_key: got %v, want %q", body.PromptCacheKey, "some-key")
+	}
+}
+
+func TestResponsesDoGenerate_PromptCacheKeyOmittedWhenUnset(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&body)
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id":         "resp_test123",
+			"created_at": 1700000000,
+			"model":      "gpt-4o-mini",
+			"output": []map[string]any{{
+				"type": "message",
+				"id":   "msg_001",
+				"role": "assistant",
+				"content": []map[string]any{{
+					"type":        "output_text",
+					"text":        "Hello!",
+					"annotations": []any{},
+				}},
+			}},
+			"usage": map[string]any{
+				"input_tokens":  5,
+				"output_tokens": 2,
+			},
+		})
+	}))
+	defer srv.Close()
+
+	p := responses.New(
+		responses.WithAPIKey("test-key"),
+		responses.WithBaseURL(srv.URL),
+	)
+
+	_, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model:    p.ChatModel("gpt-4o-mini"),
+		Messages: []sdk.Message{sdk.UserMessage("Hi")},
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate: %v", err)
+	}
+
+	if _, ok := body["prompt_cache_key"]; ok {
+		t.Errorf("expected prompt_cache_key to be omitted, got %v", body["prompt_cache_key"])
+	}
+}
+
 func TestResponsesDoGenerate_MapsMaxReasoningEffortToXHigh(t *testing.T) {
 	var body struct {
 		Reasoning *struct {

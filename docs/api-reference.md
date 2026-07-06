@@ -223,6 +223,7 @@ type GenerateParams struct {
     PresencePenalty  *float64
     Seed             *int
     ReasoningEffort  *string
+    PromptCacheKey   *string
 }
 ```
 
@@ -313,6 +314,7 @@ All options are of type `GenerateOption` (`func(*generateConfig)`).
 | `WithPresencePenalty(p float64)` | Presence penalty |
 | `WithSeed(s int)` | Random seed for reproducibility |
 | `WithReasoningEffort(effort string)` | Reasoning effort level |
+| `WithPromptCacheKey(key string)` | Cache routing hint for OpenAI prompt caching (Chat Completions & Responses API) |
 
 #### Orchestration Options
 

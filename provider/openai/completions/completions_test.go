@@ -83,6 +83,93 @@ func TestDoGenerate(t *testing.T) {
 	}
 }
 
+func TestDoGenerate_PromptCacheKey(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&body)
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id":      "chatcmpl-test",
+			"object":  "chat.completion",
+			"created": 1700000000,
+			"model":   "gpt-4o-mini",
+			"choices": []map[string]any{{
+				"index":         0,
+				"finish_reason": "stop",
+				"message":       map[string]any{"role": "assistant", "content": "Hello!"},
+			}},
+			"usage": map[string]any{
+				"prompt_tokens":     5,
+				"completion_tokens": 2,
+				"total_tokens":      7,
+			},
+		})
+	}))
+	defer srv.Close()
+
+	p := completions.New(
+		completions.WithAPIKey("test-key"),
+		completions.WithBaseURL(srv.URL),
+	)
+
+	_, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model:          &sdk.Model{ID: "gpt-4o-mini"},
+		Messages:       []sdk.Message{sdk.UserMessage("Hi")},
+		PromptCacheKey: stringPtr("some-key"),
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate failed: %v", err)
+	}
+
+	if body["prompt_cache_key"] != "some-key" {
+		t.Errorf("expected prompt_cache_key %q, got %v", "some-key", body["prompt_cache_key"])
+	}
+}
+
+func TestDoGenerate_PromptCacheKeyOmittedWhenUnset(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&body)
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id":      "chatcmpl-test",
+			"object":  "chat.completion",
+			"created": 1700000000,
+			"model":   "gpt-4o-mini",
+			"choices": []map[string]any{{
+				"index":         0,
+				"finish_reason": "stop",
+				"message":       map[string]any{"role": "assistant", "content": "Hello!"},
+			}},
+			"usage": map[string]any{
+				"prompt_tokens":     5,
+				"completion_tokens": 2,
+				"total_tokens":      7,
+			},
+		})
+	}))
+	defer srv.Close()
+
+	p := completions.New(
+		completions.WithAPIKey("test-key"),
+		completions.WithBaseURL(srv.URL),
+	)
+
+	_, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model:    &sdk.Model{ID: "gpt-4o-mini"},
+		Messages: []sdk.Message{sdk.UserMessage("Hi")},
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate failed: %v", err)
+	}
+
+	if _, ok := body["prompt_cache_key"]; ok {
+		t.Errorf("expected prompt_cache_key to be omitted, got %v", body["prompt_cache_key"])
+	}
+}
+
 func TestDoGenerate_WithBedrockCredentials(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got == "" || got[:16] != "AWS4-HMAC-SHA256" {

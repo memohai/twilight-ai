@@ -10,6 +10,7 @@ type responsesRequest struct {
 	Temperature     *float64            `json:"temperature,omitempty"`
 	TopP            *float64            `json:"top_p,omitempty"`
 	MaxOutputTokens *int                `json:"max_output_tokens,omitempty"`
+	PromptCacheKey  *string             `json:"prompt_cache_key,omitempty"`
 	Tools           []responsesTool     `json:"tools,omitempty"`
 	ToolChoice      any                 `json:"tool_choice,omitempty"`
 	Text            *responsesTextFmt   `json:"text,omitempty"`

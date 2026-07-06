@@ -45,6 +45,7 @@ type GenerateParams struct {
 	PresencePenalty  *float64 `json:"presencePenalty,omitempty"`
 	Seed             *int     `json:"seed,omitempty"`
 	ReasoningEffort  *string  `json:"reasoningEffort,omitempty"`
+	PromptCacheKey   *string  `json:"promptCacheKey,omitempty"`
 }
 
 // StepResult represents the outcome of a single step (one LLM call + tool execution round).
