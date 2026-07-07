@@ -104,7 +104,7 @@ func (p *Provider) DoGenerate(ctx context.Context, params *sdk.ImageGenerationPa
 	if params.Model == nil {
 		return nil, fmt.Errorf("alibabacloud images: generation model is required")
 	}
-	if isQwenMultimodalModel(params.Model.ID) {
+	if usesSyncMultimodal(params.Model.ID) {
 		return p.generateQwenMultimodal(ctx, params)
 	}
 
@@ -316,12 +316,25 @@ func isQwenLegacyImageModel(modelID string) bool {
 	return modelID == "qwen-image" || modelID == "qwen-image-plus"
 }
 
-func isQwenMultimodalModel(modelID string) bool {
+// usesSyncMultimodal reports whether the model is served exclusively by the
+// synchronous multimodal-generation endpoint: Qwen-Image models other than the
+// two async-capable legacy IDs, and Z-Image models.
+func usesSyncMultimodal(modelID string) bool {
 	modelID = strings.ToLower(strings.TrimSpace(modelID))
+	if strings.HasPrefix(modelID, "z-image") {
+		return true
+	}
 	return strings.HasPrefix(modelID, "qwen-image") && !isQwenLegacyImageModel(modelID)
 }
 
+// usesPromptInputText2Image reports whether the model uses the legacy async
+// text2image endpoint with prompt-string input: qwen-image/qwen-image-plus,
+// Wan models up to wan2.5, and third-party FLUX / Stable Diffusion models.
 func usesPromptInputText2Image(modelID string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(modelID))
+	if strings.HasPrefix(normalized, "flux") || strings.HasPrefix(normalized, "stable-diffusion") {
+		return true
+	}
 	return isQwenLegacyImageModel(modelID) || isLegacyWanText2ImageModel(modelID)
 }
 

@@ -827,7 +827,9 @@ DashScope exposes several image APIs; the provider selects the endpoint from the
 |--------|----------|------|
 | `qwen-image`, `qwen-image-plus` | `/services/aigc/text2image/image-synthesis` | Async task + polling |
 | `wanx-*`, `wan2.0`–`wan2.5` | `/services/aigc/text2image/image-synthesis` | Async task + polling |
+| `flux-*`, `stable-diffusion-*` | `/services/aigc/text2image/image-synthesis` | Async task + polling |
 | Other `qwen-image*` (e.g. `qwen-image-max`, `qwen-image-2.0-pro`, dated snapshots) | `/services/aigc/multimodal-generation/generation` | Synchronous |
+| `z-image*` (e.g. `z-image-turbo`) | `/services/aigc/multimodal-generation/generation` | Synchronous |
 | Other `wan*` (e.g. `wan2.6-t2i` and newer) | `/services/aigc/image-generation/generation` | Async task + polling |
 
 Async tasks are polled via `GET /tasks/{task_id}` until they succeed, fail, or the poll timeout is reached.

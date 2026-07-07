@@ -389,6 +389,123 @@ func TestGenerateDatedQwenPlusUsesSynchronousEndpoint(t *testing.T) {
 	}
 }
 
+func TestGenerateZImageUsesSynchronousEndpoint(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/services/aigc/multimodal-generation/generation":
+			if got := r.Header.Get("X-DashScope-Async"); got != "" {
+				t.Fatalf("X-DashScope-Async = %q, want empty", got)
+			}
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode request body: %v", err)
+			}
+			if got := body["model"]; got != "z-image-turbo" {
+				t.Fatalf("model = %v, want z-image-turbo", got)
+			}
+			input := body["input"].(map[string]any)
+			if _, ok := input["messages"]; !ok {
+				t.Fatalf("input.messages missing for z-image model: %v", input)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"output": {
+					"choices": [{
+						"finish_reason": "stop",
+						"message": {
+							"role": "assistant",
+							"content": [{"image":"https://example.com/z-image.png","type":"image"}]
+						}
+					}]
+				}
+			}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	provider := New(
+		WithAPIKey("dashscope-key"),
+		WithBaseURL(server.URL+"/api/v1"),
+		WithHTTPClient(server.Client()),
+	)
+	result, err := sdk.GenerateImage(context.Background(),
+		sdk.WithImageGenerationModel(provider.GenerationModel("z-image-turbo")),
+		sdk.WithImagePrompt("a red cube"),
+	)
+	if err != nil {
+		t.Fatalf("GenerateImage() error = %v", err)
+	}
+	if len(result.Data) != 1 || result.Data[0].URL != "https://example.com/z-image.png" {
+		t.Fatalf("result data = %+v, want z-image URL", result.Data)
+	}
+}
+
+func TestGenerateThirdPartyModelsUseText2ImageTask(t *testing.T) {
+	t.Parallel()
+
+	for _, modelID := range []string{"flux-schnell", "stable-diffusion-3.5-large-turbo"} {
+		t.Run(modelID, func(t *testing.T) {
+			t.Parallel()
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/v1/services/aigc/text2image/image-synthesis":
+					if got := r.Header.Get("X-DashScope-Async"); got != "enable" {
+						t.Fatalf("X-DashScope-Async = %q, want enable", got)
+					}
+					var body map[string]any
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Fatalf("decode request body: %v", err)
+					}
+					if got := body["model"]; got != modelID {
+						t.Fatalf("model = %v, want %s", got, modelID)
+					}
+					input := body["input"].(map[string]any)
+					if got := input["prompt"]; got != "a red cube" {
+						t.Fatalf("prompt = %v, want a red cube", got)
+					}
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(`{"output":{"task_id":"tp-task","task_status":"PENDING"}}`))
+				case "/api/v1/tasks/tp-task":
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(`{
+						"output": {
+							"task_id": "tp-task",
+							"task_status": "SUCCEEDED",
+							"results": [{"url":"https://example.com/third-party.png"}]
+						}
+					}`))
+				default:
+					t.Fatalf("unexpected path: %s", r.URL.Path)
+				}
+			}))
+			t.Cleanup(server.Close)
+
+			provider := New(
+				WithAPIKey("dashscope-key"),
+				WithBaseURL(server.URL+"/api/v1"),
+				WithHTTPClient(server.Client()),
+				WithPollInterval(time.Millisecond),
+				WithPollTimeout(time.Second),
+			)
+			result, err := sdk.GenerateImage(context.Background(),
+				sdk.WithImageGenerationModel(provider.GenerationModel(modelID)),
+				sdk.WithImagePrompt("a red cube"),
+			)
+			if err != nil {
+				t.Fatalf("GenerateImage() error = %v", err)
+			}
+			if len(result.Data) != 1 || result.Data[0].URL != "https://example.com/third-party.png" {
+				t.Fatalf("result data = %+v, want third-party image URL", result.Data)
+			}
+		})
+	}
+}
+
 func TestGenerateImageReturnsTaskFailure(t *testing.T) {
 	t.Parallel()
 
