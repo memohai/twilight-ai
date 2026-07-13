@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/memohai/twilight-ai/internal/utils"
-	openaiutil "github.com/memohai/twilight-ai/provider/openai"
 	"github.com/memohai/twilight-ai/sdk"
 )
 
@@ -389,7 +388,8 @@ func (p *Provider) buildRequest(params *sdk.GenerateParams) *codexRequest {
 	}
 
 	if params.ReasoningEffort != nil && *params.ReasoningEffort != "" {
-		req.Reasoning = &codexReasoning{Effort: openaiutil.NormalizeReasoningEffort(*params.ReasoningEffort)}
+		// The Codex endpoint accepts max even though generic OpenAI endpoints do not.
+		req.Reasoning = &codexReasoning{Effort: *params.ReasoningEffort}
 	}
 	return req
 }

@@ -96,7 +96,7 @@ func TestCodexDoGenerate_RequestShapeAndStream(t *testing.T) {
 	}
 }
 
-func TestCodexDoGenerate_MapsMaxReasoningEffortToXHigh(t *testing.T) {
+func TestCodexDoGenerate_PreservesMaxReasoningEffort(t *testing.T) {
 	var body struct {
 		Reasoning *struct {
 			Effort string `json:"effort"`
@@ -104,7 +104,9 @@ func TestCodexDoGenerate_MapsMaxReasoningEffortToXHigh(t *testing.T) {
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Fatalf("decode body: %v", err)
+			t.Errorf("decode body: %v", err)
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte("event: response.created\n"))
@@ -130,8 +132,8 @@ func TestCodexDoGenerate_MapsMaxReasoningEffortToXHigh(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DoGenerate: %v", err)
 	}
-	if body.Reasoning == nil || body.Reasoning.Effort != "xhigh" {
-		t.Fatalf("reasoning.effort: got %#v, want xhigh", body.Reasoning)
+	if body.Reasoning == nil || body.Reasoning.Effort != "max" {
+		t.Fatalf("reasoning.effort: got %#v, want max", body.Reasoning)
 	}
 }
 
