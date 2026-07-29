@@ -17,17 +17,23 @@ func normalizeSchemaForKimi(value any) (any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("marshal: %w", err)
 	}
-	var schema map[string]any
-	if err := json.Unmarshal(data, &schema); err != nil {
+	var decoded any
+	if err := json.Unmarshal(data, &decoded); err != nil {
 		return nil, fmt.Errorf("decode: %w", err)
 	}
-	if schema == nil {
+	switch schema := decoded.(type) {
+	case nil:
 		return nil, nil
+	case map[string]any:
+		if err := normalizeKimiSchemaMap(schema, "$"); err != nil {
+			return nil, err
+		}
+		return schema, nil
+	case bool:
+		return nil, fmt.Errorf("$: boolean schemas are not supported")
+	default:
+		return nil, fmt.Errorf("$: expected a schema object, got %T", decoded)
 	}
-	if err := normalizeKimiSchemaMap(schema, "$"); err != nil {
-		return nil, err
-	}
-	return schema, nil
 }
 
 func normalizeKimiSchemaMap(schema map[string]any, path string) error {
@@ -122,10 +128,14 @@ func normalizeKimiSchemaMap(schema map[string]any, path string) error {
 	}
 
 	if rawAdditional, exists := schema["additionalProperties"]; exists {
-		if additional, ok := rawAdditional.(map[string]any); ok {
+		switch additional := rawAdditional.(type) {
+		case bool:
+		case map[string]any:
 			if err := normalizeKimiSchemaMap(additional, path+".additionalProperties"); err != nil {
 				return err
 			}
+		default:
+			return fmt.Errorf("%s.additionalProperties: expected a boolean or an object", path)
 		}
 	}
 

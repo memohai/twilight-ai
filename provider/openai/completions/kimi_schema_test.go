@@ -199,6 +199,49 @@ func TestNormalizeSchemaForKimiRejectsBooleanCombinatorBranches(t *testing.T) {
 	}
 }
 
+func TestNormalizeSchemaForKimiRejectsNonObjectRootSchema(t *testing.T) {
+	cases := []struct {
+		name    string
+		value   any
+		wantErr string
+	}{
+		{"boolean", true, "$: boolean schemas are not supported"},
+		{"array", []any{"a"}, "$: expected a schema object"},
+		{"string", "not a schema", "$: expected a schema object"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := normalizeSchemaForKimi(tc.value)
+			if err == nil {
+				t.Fatalf("expected %T root schema to fail", tc.value)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error %q does not contain %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestNormalizeSchemaForKimiRejectsInvalidAdditionalProperties(t *testing.T) {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"config": map[string]any{
+				"type":                 "object",
+				"additionalProperties": "yes",
+			},
+		},
+	}
+
+	_, err := normalizeSchemaForKimi(schema)
+	if err == nil {
+		t.Fatal("expected invalid additionalProperties to fail")
+	}
+	if !strings.Contains(err.Error(), "$.properties.config.additionalProperties") {
+		t.Fatalf("error %q does not identify the offending schema path", err)
+	}
+}
+
 func schemaPathMap(t *testing.T, m map[string]any, path ...string) map[string]any {
 	t.Helper()
 	current := m
