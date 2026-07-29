@@ -1899,10 +1899,51 @@ func kimiAnyOfTool() sdk.Tool {
 	}
 }
 
-func decodeToolParameters(t *testing.T, r *http.Request) map[string]any {
+func kimiMemohAttachmentTool() sdk.Tool {
+	return sdk.Tool{
+		Name:        "send_message",
+		Description: "Send attachments",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"attachments": map[string]any{
+					"type": "array",
+					"items": map[string]any{
+						"anyOf": []any{
+							map[string]any{"type": "string"},
+							map[string]any{
+								"type":                 "object",
+								"additionalProperties": false,
+								"anyOf": []any{
+									map[string]any{"required": []string{"path"}},
+									map[string]any{"required": []string{"url"}},
+									map[string]any{"required": []string{"base64"}},
+									map[string]any{"required": []string{"content_hash"}},
+									map[string]any{"required": []string{"platform_key"}},
+								},
+								"properties": map[string]any{
+									"path":         map[string]any{"type": "string"},
+									"url":          map[string]any{"type": "string"},
+									"base64":       map[string]any{"type": "string"},
+									"content_hash": map[string]any{"type": "string"},
+									"platform_key": map[string]any{"type": "string"},
+									"metadata":     map[string]any{"type": "object"},
+								},
+							},
+						},
+					},
+				},
+			},
+			"required": []string{"attachments"},
+		},
+	}
+}
+
+func decodeToolParameters(t *testing.T, r *http.Request) (map[string]any, bool) {
 	t.Helper()
 	var body struct {
-		Tools []struct {
+		Stream bool `json:"stream"`
+		Tools  []struct {
 			Function struct {
 				Parameters map[string]any `json:"parameters"`
 			} `json:"function"`
@@ -1914,7 +1955,7 @@ func decodeToolParameters(t *testing.T, r *http.Request) map[string]any {
 	if len(body.Tools) != 1 {
 		t.Fatalf("expected 1 tool, got %d", len(body.Tools))
 	}
-	return body.Tools[0].Function.Parameters
+	return body.Tools[0].Function.Parameters, body.Stream
 }
 
 // assertKimiSanitizedAnyOf checks that the "attachments.items" schema no
@@ -1941,6 +1982,52 @@ func assertKimiSanitizedAnyOf(t *testing.T, params map[string]any) {
 	}
 }
 
+func assertKimiNormalizedMemohAttachments(t *testing.T, params map[string]any) {
+	t.Helper()
+	items := schemaPath(t, params, "properties", "attachments", "items")
+	outerAnyOf, ok := items["anyOf"].([]any)
+	if !ok || len(outerAnyOf) != 2 {
+		t.Fatalf("attachments.items.anyOf = %#v, want two branches", items["anyOf"])
+	}
+	objectBranch, ok := outerAnyOf[1].(map[string]any)
+	if !ok {
+		t.Fatalf("attachments object branch = %T, want map[string]any", outerAnyOf[1])
+	}
+	for _, key := range []string{"type", "properties", "required", "additionalProperties"} {
+		if _, exists := objectBranch[key]; exists {
+			t.Fatalf("attachments object parent still contains %q: %#v", key, objectBranch)
+		}
+	}
+	innerAnyOf, ok := objectBranch["anyOf"].([]any)
+	if !ok || len(innerAnyOf) != 5 {
+		t.Fatalf("attachments object anyOf = %#v, want five branches", objectBranch["anyOf"])
+	}
+	for index, rawBranch := range innerAnyOf {
+		branch, ok := rawBranch.(map[string]any)
+		if !ok {
+			t.Fatalf("attachments object anyOf[%d] = %T, want map[string]any", index, rawBranch)
+		}
+		if branch["type"] != "object" || branch["additionalProperties"] != false {
+			t.Fatalf("attachments object anyOf[%d] lacks object constraints: %#v", index, branch)
+		}
+		properties, ok := branch["properties"].(map[string]any)
+		if !ok {
+			t.Fatalf("attachments object anyOf[%d].properties = %T", index, branch["properties"])
+		}
+		required, ok := branch["required"].([]any)
+		if !ok || len(required) != 1 {
+			t.Fatalf("attachments object anyOf[%d].required = %#v", index, branch["required"])
+		}
+		name, ok := required[0].(string)
+		if !ok {
+			t.Fatalf("attachments object anyOf[%d].required[0] = %#v", index, required[0])
+		}
+		if _, exists := properties[name]; !exists {
+			t.Fatalf("attachments object anyOf[%d] requires undefined property %q", index, name)
+		}
+	}
+}
+
 func schemaPath(t *testing.T, m map[string]any, path ...string) map[string]any {
 	t.Helper()
 	cur := m
@@ -1957,7 +2044,13 @@ func schemaPath(t *testing.T, m map[string]any, path ...string) map[string]any {
 func newEchoToolsServer(t *testing.T, capture *map[string]any) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		*capture = decodeToolParameters(t, r)
+		var stream bool
+		*capture, stream = decodeToolParameters(t, r)
+		if stream {
+			w.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(w, "data: [DONE]\n\n")
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
 			"id":    "chatcmpl-kimi",
@@ -1993,6 +2086,53 @@ func TestDoGenerate_KimiCompatSanitizesAnyOfSchema(t *testing.T) {
 	assertKimiSanitizedAnyOf(t, params)
 }
 
+func TestDoGenerate_KimiCompatNormalizesMemohAttachmentSchema(t *testing.T) {
+	var params map[string]any
+	srv := newEchoToolsServer(t, &params)
+	defer srv.Close()
+
+	p := completions.New(
+		completions.WithAPIKey("k"),
+		completions.WithBaseURL(srv.URL),
+		completions.WithKimiChatCompletionsCompat(),
+	)
+	_, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model:    &sdk.Model{ID: "kimi-k2"},
+		Messages: []sdk.Message{sdk.UserMessage("hi")},
+		Tools:    []sdk.Tool{kimiMemohAttachmentTool()},
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate: %v", err)
+	}
+	assertKimiNormalizedMemohAttachments(t, params)
+}
+
+func TestDoStream_KimiCompatNormalizesMemohAttachmentSchema(t *testing.T) {
+	var params map[string]any
+	srv := newEchoToolsServer(t, &params)
+	defer srv.Close()
+
+	p := completions.New(
+		completions.WithAPIKey("k"),
+		completions.WithBaseURL(srv.URL),
+		completions.WithKimiChatCompletionsCompat(),
+	)
+	result, err := p.DoStream(context.Background(), sdk.GenerateParams{
+		Model:    &sdk.Model{ID: "kimi-k2"},
+		Messages: []sdk.Message{sdk.UserMessage("hi")},
+		Tools:    []sdk.Tool{kimiMemohAttachmentTool()},
+	})
+	if err != nil {
+		t.Fatalf("DoStream: %v", err)
+	}
+	for part := range result.Stream {
+		if errorPart, ok := part.(*sdk.ErrorPart); ok {
+			t.Fatalf("stream error: %v", errorPart.Error)
+		}
+	}
+	assertKimiNormalizedMemohAttachments(t, params)
+}
+
 // redirectingTransport rewrites every outgoing request's scheme/host to
 // point at a local test server while leaving the rest of the request (path,
 // body, etc.) untouched. This lets a test configure WithBaseURL with a real
@@ -2010,54 +2150,36 @@ func (rt *redirectingTransport) RoundTrip(req *http.Request) (*http.Response, er
 	return http.DefaultTransport.RoundTrip(req)
 }
 
-// TestKimiCompatAutoDetectedFromMoonshotBaseURL verifies the fallback: a base
-// URL that looks like Moonshot's (api.moonshot.cn / api.moonshot.ai) enables
-// Kimi compat -- and therefore anyOf schema sanitization -- even without the
-// caller explicitly calling WithKimiChatCompletionsCompat. Other base URLs
-// must leave the schema untouched.
-func TestKimiCompatAutoDetectedFromMoonshotBaseURL(t *testing.T) {
-	cases := []struct {
-		name    string
-		baseURL string
-		want    bool
-	}{
-		{"moonshot cn", "https://api.moonshot.cn/v1", true},
-		{"moonshot ai", "https://api.moonshot.ai/v1", true},
-		{"moonshot cn uppercase host", "https://API.MOONSHOT.CN/v1", true},
-		{"openai", "https://api.openai.com/v1", false},
-		{"deepseek", "https://api.deepseek.com", false},
+// TestKimiCompatRequiresExplicitOption verifies that a Moonshot-looking base
+// URL alone does not select a wire dialect. Callers must opt into Kimi/MFJS
+// behavior explicitly.
+func TestKimiCompatRequiresExplicitOption(t *testing.T) {
+	var params map[string]any
+	srv := newEchoToolsServer(t, &params)
+	defer srv.Close()
+
+	target, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parse test server URL: %v", err)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			var params map[string]any
-			srv := newEchoToolsServer(t, &params)
-			defer srv.Close()
 
-			target, err := url.Parse(srv.URL)
-			if err != nil {
-				t.Fatalf("parse test server URL: %v", err)
-			}
+	p := completions.New(
+		completions.WithAPIKey("k"),
+		completions.WithBaseURL("https://api.moonshot.cn/v1"),
+		completions.WithHTTPClient(&http.Client{Transport: &redirectingTransport{targetURL: target}}),
+	)
+	_, err = p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model:    &sdk.Model{ID: "kimi-k2"},
+		Messages: []sdk.Message{sdk.UserMessage("hi")},
+		Tools:    []sdk.Tool{kimiAnyOfTool()},
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate: %v", err)
+	}
 
-			p := completions.New(
-				completions.WithAPIKey("k"),
-				completions.WithBaseURL(tc.baseURL),
-				completions.WithHTTPClient(&http.Client{Transport: &redirectingTransport{targetURL: target}}),
-			)
-			_, err = p.DoGenerate(context.Background(), sdk.GenerateParams{
-				Model:    &sdk.Model{ID: "kimi-k2"},
-				Messages: []sdk.Message{sdk.UserMessage("hi")},
-				Tools:    []sdk.Tool{kimiAnyOfTool()},
-			})
-			if err != nil {
-				t.Fatalf("DoGenerate: %v", err)
-			}
-
-			_, hasParentType := schemaPath(t, params, "properties", "attachments", "items")["type"]
-			gotSanitized := !hasParentType
-			if gotSanitized != tc.want {
-				t.Fatalf("baseURL %q: sanitized=%v, want %v", tc.baseURL, gotSanitized, tc.want)
-			}
-		})
+	items := schemaPath(t, params, "properties", "attachments", "items")
+	if items["type"] != "object" {
+		t.Fatalf("Moonshot base URL unexpectedly enabled Kimi compat: %#v", items)
 	}
 }
 
