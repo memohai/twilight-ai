@@ -464,7 +464,14 @@ func convertContent(parts []sdk.MessagePart) any {
 				ImageURL: chatImageURL{URL: p.Image},
 			})
 		case sdk.FilePart:
-			out = append(out, chatContentPartText{Type: "text", Text: p.Data})
+			data, mediaType := utils.NormalizeFileData(p.Data, p.MediaType)
+			out = append(out, chatContentPartFile{
+				Type: "file",
+				File: chatFile{
+					Filename: strings.TrimSpace(p.Filename),
+					FileData: utils.FileDataURL(data, mediaType),
+				},
+			})
 		}
 	}
 	return out

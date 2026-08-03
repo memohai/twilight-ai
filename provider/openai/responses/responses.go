@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/memohai/twilight-ai/internal/messagecompat"
@@ -308,7 +309,12 @@ func convertResponsesUserMessage(msg sdk.Message) []json.RawMessage {
 		case sdk.ImagePart:
 			parts = append(parts, responsesUserContentPart{Type: "input_image", ImageURL: p.Image})
 		case sdk.FilePart:
-			parts = append(parts, responsesUserContentPart{Type: "input_text", Text: p.Data})
+			data, mediaType := utils.NormalizeFileData(p.Data, p.MediaType)
+			parts = append(parts, responsesUserContentPart{
+				Type:     "input_file",
+				Filename: strings.TrimSpace(p.Filename),
+				FileData: utils.FileDataURL(data, mediaType),
+			})
 		}
 	}
 	return []json.RawMessage{marshalRaw(responsesUserMessage{

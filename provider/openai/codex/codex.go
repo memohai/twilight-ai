@@ -463,7 +463,10 @@ func convertCodexUserMessage(msg sdk.Message) []json.RawMessage {
 		case sdk.ImagePart:
 			parts = append(parts, codexUserContentPart{Type: "input_image", ImageURL: p.Image})
 		case sdk.FilePart:
-			parts = append(parts, codexUserContentPart{Type: "input_text", Text: p.Data})
+			// Codex has no confirmed native file input; emit an explicit
+			// marker instead of the raw payload. Swap for a native part once
+			// upstream support is verified.
+			parts = append(parts, codexUserContentPart{Type: "input_text", Text: utils.OmittedFileNotice(p.Filename, p.MediaType)})
 		}
 	}
 	return []json.RawMessage{marshalRaw(codexUserMessage{Role: "user", Content: parts})}

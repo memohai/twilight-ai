@@ -68,6 +68,16 @@ type chatContentPartImage struct {
 	ImageURL chatImageURL `json:"image_url"`
 }
 
+type chatContentPartFile struct {
+	Type string   `json:"type"`
+	File chatFile `json:"file"`
+}
+
+type chatFile struct {
+	Filename string `json:"filename,omitempty"`
+	FileData string `json:"file_data"`
+}
+
 type chatImageURL struct {
 	URL    string `json:"url"`
 	Detail string `json:"detail,omitempty"`

@@ -294,12 +294,9 @@ func convertUserMessage(msg sdk.Message) content {
 				})
 			}
 		case sdk.FilePart:
-			mediaType := p.MediaType
-			if mediaType == "" {
-				mediaType = "application/octet-stream"
-			}
+			data, mediaType := utils.NormalizeFileData(p.Data, p.MediaType)
 			parts = append(parts, contentPart{
-				InlineData: &inlineData{MimeType: mediaType, Data: p.Data},
+				InlineData: &inlineData{MimeType: mediaType, Data: data},
 			})
 		}
 	}

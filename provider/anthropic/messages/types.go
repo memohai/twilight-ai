@@ -49,8 +49,9 @@ type contentBlock struct {
 	// text block
 	Text string `json:"text,omitempty"`
 
-	// image block
+	// image / document block
 	Source *imageSource `json:"source,omitempty"`
+	Title  string       `json:"title,omitempty"`
 
 	// thinking block
 	Thinking  string `json:"thinking,omitempty"`

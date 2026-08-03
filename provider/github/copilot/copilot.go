@@ -314,7 +314,11 @@ func convertContent(parts []sdk.MessagePart) any {
 				ImageURL: chatImageURL{URL: p.Image},
 			})
 		case sdk.FilePart:
-			out = append(out, chatContentPartText{Type: "text", Text: p.Data})
+			// Copilot has no confirmed native file input. Emit an explicit
+			// marker instead of the raw payload: silently sending megabytes of
+			// base64 as "text" is exactly the failure mode file parts exist to
+			// fix. Swap this for a native part once upstream support lands.
+			out = append(out, chatContentPartText{Type: "text", Text: utils.OmittedFileNotice(p.Filename, p.MediaType)})
 		}
 	}
 	return out

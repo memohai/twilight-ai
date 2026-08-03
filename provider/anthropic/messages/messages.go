@@ -453,14 +453,34 @@ func convertUserContent(parts []sdk.MessagePart) []contentBlock {
 		case sdk.ImagePart:
 			blocks = append(blocks, convertImagePart(p))
 		case sdk.FilePart:
-			block := contentBlock{Type: blockTypeText, Text: p.Data}
-			if p.CacheControl != nil {
-				block.CacheControl = &cacheControl{Type: p.CacheControl.Type, TTL: p.CacheControl.TTL}
-			}
-			blocks = append(blocks, block)
+			blocks = append(blocks, convertFilePart(p))
 		}
 	}
 	return blocks
+}
+
+// convertFilePart converts an sdk.FilePart into an Anthropic document content
+// block for native file input (text layer + per-page rendering happen on the
+// provider side). FilePart data is bare base64 by convention; data URLs are
+// tolerated and stripped.
+func convertFilePart(p sdk.FilePart) contentBlock {
+	data, mediaType := utils.NormalizeFileData(p.Data, p.MediaType)
+
+	var cc *cacheControl
+	if p.CacheControl != nil {
+		cc = &cacheControl{Type: p.CacheControl.Type, TTL: p.CacheControl.TTL}
+	}
+
+	return contentBlock{
+		Type: "document",
+		Source: &imageSource{
+			Type:      "base64",
+			MediaType: mediaType,
+			Data:      data,
+		},
+		Title:        strings.TrimSpace(p.Filename),
+		CacheControl: cc,
+	}
 }
 
 // convertImagePart converts an sdk.ImagePart into an Anthropic content block,
