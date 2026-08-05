@@ -16,6 +16,9 @@ func buildConfig(options []GenerateOption) (*generateConfig, Provider, error) {
 	if cfg.Params.Model.Provider == nil {
 		return nil, nil, fmt.Errorf("twilightai: model %q has no provider", cfg.Params.Model.ID)
 	}
+	if cfg.ApprovalHandler != nil && cfg.ApprovalBatchHandler != nil {
+		return nil, nil, fmt.Errorf("twilightai: WithApprovalHandler and WithApprovalBatchHandler are mutually exclusive")
+	}
 	for i := range cfg.Params.Tools {
 		schema, err := resolveSchema(cfg.Params.Tools[i].Parameters)
 		if err != nil {
