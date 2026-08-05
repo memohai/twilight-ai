@@ -10,7 +10,7 @@ import "strings"
 // application/pdf as the fallback — file parts exist for provider-native
 // document input, where PDF is the only interchange format every supported
 // provider accepts, so an unlabeled payload is treated as one.
-func NormalizeFileData(data, mediaType string) (string, string) {
+func NormalizeFileData(data, mediaType string) (base64Data, effectiveMediaType string) {
 	data = strings.TrimSpace(data)
 	mediaType = strings.TrimSpace(mediaType)
 
