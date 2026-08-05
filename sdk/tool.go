@@ -2,8 +2,6 @@ package sdk
 
 import (
 	"context"
-	"errors"
-	"fmt"
 )
 
 // ToolExecuteFunc is the signature for a tool's execution handler.
@@ -35,24 +33,31 @@ type ToolApprovalResult struct {
 	Metadata   map[string]any       `json:"metadata,omitempty"`
 }
 
-var ErrToolApprovalDeferred = errors.New("tool approval deferred")
-
-type ToolApprovalDeferredError struct {
-	Approval ToolApprovalResult
+// DeferredToolApproval pairs a tool call awaiting a user decision with the
+// approval state returned by the ApprovalHandler for that call.
+type DeferredToolApproval struct {
+	ToolCall ToolCall           `json:"toolCall"`
+	Approval ToolApprovalResult `json:"approval"`
 }
 
-func (e *ToolApprovalDeferredError) Error() string {
-	if e == nil {
-		return ErrToolApprovalDeferred.Error()
-	}
-	if e.Approval.ApprovalID == "" {
-		return ErrToolApprovalDeferred.Error()
-	}
-	return fmt.Sprintf("%s: %s", ErrToolApprovalDeferred, e.Approval.ApprovalID)
-}
-
-func (e *ToolApprovalDeferredError) Is(target error) bool {
-	return target == ErrToolApprovalDeferred
+// ToolApprovalPause is the portable state of a run that stopped on deferred
+// tool approvals (FinishReason == FinishReasonPaused). It carries everything
+// needed to resume: the run's system prompt, the full conversation (input
+// plus every message the run produced, ending in the paused step's assistant
+// message and the tool message covering the already-resolved calls) and the
+// calls awaiting a decision. The value is plain data — persist it, ship it
+// across processes, and hand it back to ResumeText / ApplyToolDecisions once
+// decisions arrive.
+type ToolApprovalPause struct {
+	// System is the root instruction the paused run was started with. Resume
+	// re-applies it so the model keeps its original instructions; a resume
+	// that also passes WithSystem is rejected as conflicting.
+	System string `json:"system,omitempty"`
+	// Messages is the full conversation at the pause point.
+	Messages []Message `json:"messages"`
+	// Pending lists the tool calls awaiting a user decision, in the paused
+	// assistant message's order.
+	Pending []DeferredToolApproval `json:"pending"`
 }
 
 type Tool struct {

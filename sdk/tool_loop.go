@@ -2,7 +2,6 @@ package sdk
 
 import (
 	"context"
-	"errors"
 )
 
 // stepOutcome is the transport-agnostic product of one provider call.
@@ -29,17 +28,36 @@ type toolLoopState struct {
 	totalUsage      Usage
 	finishReason    FinishReason
 	rawFinishReason string
+	// input is the conversation the run started from, snapshotted before the
+	// first step. PrepareStep and OnStep overrides mutate cfg.Params during
+	// the loop, so the pause must be built from this snapshot — never from
+	// cfg.Params.Messages after the loop has run.
+	input []Message
+	// system is the run's root instruction, snapshotted alongside input so a
+	// pause carries everything needed to resume in another process.
+	system string
 }
 
-// deferredToolApproval returns the approval of the step that paused the run,
-// or nil if the run finished normally.
-func (st *toolLoopState) deferredToolApproval() *ToolApprovalResult {
-	for i := range st.steps {
-		if st.steps[i].DeferredToolApproval != nil {
-			return st.steps[i].DeferredToolApproval
-		}
+// pause returns the portable resume state when the run stopped on deferred
+// approvals, or nil if it finished normally. Only the last committed step can
+// carry deferrals: the loop breaks immediately after committing one.
+func (st *toolLoopState) pause() *ToolApprovalPause {
+	n := len(st.steps)
+	if n == 0 || len(st.steps[n-1].DeferredToolApprovals) == 0 {
+		return nil
 	}
-	return nil
+	msgs := make([]Message, 0, len(st.input)+len(st.messages))
+	msgs = append(msgs, st.input...)
+	msgs = append(msgs, st.messages...)
+	// Copy Pending so mutations by the host cannot rewrite the step record
+	// (the StepResult holds the same backing array otherwise).
+	pending := make([]DeferredToolApproval, len(st.steps[n-1].DeferredToolApprovals))
+	copy(pending, st.steps[n-1].DeferredToolApprovals)
+	return &ToolApprovalPause{
+		System:   st.system,
+		Messages: msgs,
+		Pending:  pending,
+	}
 }
 
 // runToolLoop drives the multi-step tool-execution state machine shared by
@@ -74,8 +92,17 @@ func runToolLoop(
 	}
 
 	toolMap := buildToolMap(cfg.Params.Tools)
-	messages := make([]Message, len(cfg.Params.Messages))
-	copy(messages, cfg.Params.Messages)
+	// Snapshot the pristine input and system prompt before the first step:
+	// PrepareStep/OnStep overrides mutate cfg.Params mid-loop, and the pause
+	// must be reconstructable from what the run actually started with.
+	st.input = make([]Message, len(cfg.Params.Messages))
+	copy(st.input, cfg.Params.Messages)
+	st.system = cfg.Params.System
+	// The working conversation starts as an alias of the snapshot; the alias
+	// is safe because len==cap, so the first append reallocates, and
+	// PrepareStep (the only in-place mutator) runs no earlier than the
+	// iteration after that append.
+	messages := st.input
 
 	for iter := 0; shouldContinueLoop(maxSteps, iter); iter++ {
 		// Prepare before every model call that follows a committed step.
@@ -102,21 +129,23 @@ func runToolLoop(
 			break
 		}
 
-		toolResults, err := executeTools(ctx, out.toolCalls, toolMap, cfg.ApprovalHandler, sendProgress)
+		toolResults, deferred, err := executeTools(ctx, out.toolCalls, toolMap, cfg.ApprovalHandler, sendProgress)
 		if err != nil {
-			var deferred *ToolApprovalDeferredError
-			if errors.As(err, &deferred) {
-				if _, err := st.commitStep(ctx, cfg, &out, nil, &deferred.Approval); err != nil {
-					return st, err
-				}
-				break
-			}
 			return st, err
 		}
 
-		stepMsgs, err := st.commitStep(ctx, cfg, &out, toolResults, nil)
+		// When calls were deferred, the step's tool message carries only the
+		// results already resolved in this batch; the run pauses and reports
+		// FinishReasonPaused so callers can tell a pause from a normal
+		// tool-calls finish. The step itself keeps the provider's finish
+		// reason — it describes the model call, not the run.
+		stepMsgs, err := st.commitStep(ctx, cfg, &out, toolResults, deferred)
 		if err != nil {
 			return st, err
+		}
+		if len(deferred) > 0 {
+			st.finishReason = FinishReasonPaused
+			break
 		}
 		messages = append(messages, stepMsgs...)
 	}
@@ -126,26 +155,26 @@ func runToolLoop(
 
 // commitStep assembles the StepResult for one step, passes it through the
 // commit barrier, and records it. The step's index is its position in the
-// committed sequence. toolResults is nil for final and deferred steps;
-// deferredApproval is set only when the step paused on a tool approval.
+// committed sequence. toolResults holds the resolved results (nil on final
+// steps); deferred lists the calls still awaiting a user decision.
 func (st *toolLoopState) commitStep(
 	ctx context.Context,
 	cfg *generateConfig,
 	out *stepOutcome,
 	toolResults []ToolResultPart,
-	deferredApproval *ToolApprovalResult,
+	deferred []DeferredToolApproval,
 ) ([]Message, error) {
 	stepMsgs := buildStepMessages(out.text, out.reasoning, out.reasoningMeta, out.toolCalls, toolResults, &out.usage)
 	sr := StepResult{
-		Text:                 out.text,
-		Reasoning:            out.reasoning,
-		FinishReason:         out.finishReason,
-		RawFinishReason:      out.rawFinishReason,
-		Usage:                out.usage,
-		ToolCalls:            out.toolCalls,
-		Response:             out.response,
-		DeferredToolApproval: deferredApproval,
-		Messages:             stepMsgs,
+		Text:                  out.text,
+		Reasoning:             out.reasoning,
+		FinishReason:          out.finishReason,
+		RawFinishReason:       out.rawFinishReason,
+		Usage:                 out.usage,
+		ToolCalls:             out.toolCalls,
+		Response:              out.response,
+		DeferredToolApprovals: deferred,
+		Messages:              stepMsgs,
 	}
 	if len(toolResults) > 0 {
 		sr.ToolResults = toolCallResultsFromParts(toolResults)

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/memohai/twilight-ai/internal/messagecompat"
@@ -240,7 +241,7 @@ func convertMessages(systemPrompt string, messages []sdk.Message) ([]content, *c
 		}
 	}
 
-	for _, msg := range messages {
+	for _, msg := range coalesceToolMessages(messages) {
 		if msg.Role == sdk.MessageRoleSystem {
 			if sysInstruction == nil {
 				sysInstruction = &content{}
@@ -251,6 +252,71 @@ func convertMessages(systemPrompt string, messages []sdk.Message) ([]content, *c
 		contents = append(contents, convertMessage(msg)...)
 	}
 	return contents, sysInstruction
+}
+
+// coalesceToolMessages merges runs of consecutive tool messages (the shape a
+// paused-then-resumed run produces: partial results at the pause, completion
+// on resume) into a single tool message, with results ordered to match the
+// preceding assistant message's tool-call order. Gemini requires strict
+// user/model turn alternation, all functionResponses for one functionCall
+// turn in a single user turn, and — because functionResponse carries only a
+// name, not a call ID — positional association with the calls.
+func coalesceToolMessages(messages []sdk.Message) []sdk.Message {
+	out := make([]sdk.Message, 0, len(messages))
+	for i := 0; i < len(messages); i++ {
+		msg := messages[i]
+		if msg.Role != sdk.MessageRoleTool || i+1 >= len(messages) || messages[i+1].Role != sdk.MessageRoleTool {
+			out = append(out, msg)
+			continue
+		}
+		merged := sdk.Message{Role: sdk.MessageRoleTool}
+		merged.Content = append(merged.Content, msg.Content...)
+		for i+1 < len(messages) && messages[i+1].Role == sdk.MessageRoleTool {
+			i++
+			merged.Content = append(merged.Content, messages[i].Content...)
+		}
+		if len(out) > 0 {
+			merged.Content = orderToolResultsByCalls(merged.Content, out[len(out)-1])
+		}
+		out = append(out, merged)
+	}
+	return out
+}
+
+// orderToolResultsByCalls sorts ToolResultParts to follow the tool-call order
+// of the assistant message they answer, matching by ToolCallID. Parts without
+// a matching call keep their relative order at the end.
+func orderToolResultsByCalls(parts []sdk.MessagePart, assistant sdk.Message) []sdk.MessagePart {
+	if assistant.Role != sdk.MessageRoleAssistant {
+		return parts
+	}
+	callOrder := make(map[string]int)
+	n := 0
+	for _, p := range assistant.Content {
+		if tcp, ok := p.(sdk.ToolCallPart); ok {
+			callOrder[tcp.ToolCallID] = n
+			n++
+		}
+	}
+	if n < 2 {
+		return parts
+	}
+	ordered := make([]sdk.MessagePart, len(parts))
+	copy(ordered, parts)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		ri, iok := ordered[i].(sdk.ToolResultPart)
+		rj, jok := ordered[j].(sdk.ToolResultPart)
+		if !iok || !jok {
+			return false
+		}
+		pi, iHas := callOrder[ri.ToolCallID]
+		pj, jHas := callOrder[rj.ToolCallID]
+		if !iHas || !jHas {
+			return iHas
+		}
+		return pi < pj
+	})
+	return ordered
 }
 
 func convertMessage(msg sdk.Message) []content {
