@@ -238,6 +238,9 @@ type StreamResult struct {
 	// Pause is set when the run stopped on deferred tool approvals. It is the
 	// portable resume state; populated once the stream is fully consumed.
 	Pause *ToolApprovalPause
+	// Resume reports the decisions applied before the stream opened when the
+	// run was started by ResumeTextStream. Available immediately.
+	Resume *ToolApprovalResolution
 }
 
 // Text consumes the entire stream and returns the concatenated text content.
@@ -305,5 +308,6 @@ func (sr *StreamResult) ToResult() (*GenerateResult, error) {
 	result.Steps = sr.Steps
 	result.Messages = sr.Messages
 	result.Pause = sr.Pause
+	result.Resume = sr.Resume
 	return result, streamErr
 }

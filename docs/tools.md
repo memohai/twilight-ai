@@ -321,6 +321,44 @@ A paused run reports `FinishReasonPaused` on the overall result (and on the stre
 
 The paused step's `Messages` include the assistant message with all tool calls plus a tool message covering the already-resolved calls. Migration note for pre-0.5 integrations: the paused step used to record no tool results at all — code that appended a complete tool message covering every call on resume must now supply results only for the deferred calls, or providers will reject the duplicate results. (Persisted JSON from older versions used the singular `deferredToolApproval` key, which this version no longer reads.)
 
+### Resuming After Decisions
+
+Once the decisions arrive, hand the pause back with one explicit `ToolDecision` per pending call, keyed by `ToolCallID`. `ResumeText` (blocking) and `ResumeTextStream` (streaming) apply the decisions and continue generation. Do not pass `WithMessages` — the conversation comes from the pause:
+
+```go
+decisions := map[string]sdk.ToolDecision{}
+for _, d := range pause.Pending {
+    decisions[d.ToolCall.ToolCallID] = decideFromUI(d) // approved or rejected
+}
+
+resumed, err := sdk.ResumeText(ctx, *pause, decisions,
+    sdk.WithModel(model),
+    sdk.WithTools(tools),               // same tool set as the original run
+    sdk.WithMaxSteps(5),
+    sdk.WithApprovalHandler(handler),   // keep it: the model may pause again
+)
+```
+
+Before the first model call, the SDK validates and applies the decisions: approved calls execute through the normal tool path, rejected calls get an error result carrying the decision's `Reason`. Validation fails fast — before any tool execution or model call — on a missing decision, a decision for an unknown call, a decision that is not explicitly approved or rejected (the zero value is not approval), or an approved call whose tool is missing from `WithTools`. The pause is also cross-checked against its own conversation: `Pending` must match the calls the `Messages` tail leaves unresolved, so a hand-assembled pause that disagrees with itself fails loudly.
+
+The applied decisions are reported on `result.Resume` (a `ToolApprovalResolution` with the results and the completing tool message) rather than as a synthetic step: `Steps`, `PrepareStep`, and `OnStepCommitted` see only real model steps, numbered exactly as in a fresh run. If the model requests another gated call, the resumed run pauses again with a fresh `result.Pause`. In streaming mode the decisions are applied before the stream opens, so the stream carries a normal provider lifecycle and `StreamResult.Resume` is available immediately.
+
+When tool side effects must not run twice (deployments, payments), split the phases with `ApplyToolDecisions`: it applies the decisions and returns the completing tool message without any model call — no model configuration needed — so you can persist the completed conversation first and retry generation alone on failure:
+
+```go
+resolution, err := sdk.ApplyToolDecisions(ctx, *pause, decisions, tools)
+if err != nil {
+    return err
+}
+// slices.Concat allocates a fresh slice: appending to pause.Messages could
+// write into the pause's backing array after a JSON reload.
+completed := slices.Concat(pause.Messages, resolution.Messages)
+persist(completed) // durable before the model call
+result, err := sdk.GenerateTextResult(ctx,
+    sdk.WithModel(model), sdk.WithMessages(completed),
+    sdk.WithTools(tools), sdk.WithMaxSteps(5)) // safe to retry
+```
+
 ## Streaming with Tools
 
 Tool calling works seamlessly with `StreamText`. Progress updates from tool execution are delivered through the stream:
