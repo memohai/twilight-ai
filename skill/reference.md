@@ -287,6 +287,7 @@ func WithReasoningEffort(effort string) GenerateOption
 func WithMaxSteps(n int) GenerateOption
 func WithOnFinish(fn func(*GenerateResult)) GenerateOption
 func WithOnStep(fn func(*StepResult) *GenerateParams) GenerateOption
+func WithOnStepCommitted(fn func(ctx context.Context, stepIndex int, step *StepResult) error) GenerateOption
 func WithPrepareStep(fn func(*GenerateParams) *GenerateParams) GenerateOption
 func WithApprovalHandler(fn func(ctx context.Context, call ToolCall) (bool, error)) GenerateOption
 ```
@@ -296,6 +297,7 @@ Behavior notes:
 - `WithMaxSteps(0)` is the default single-call mode.
 - `WithMaxSteps(N)` enables automatic tool execution for up to `N` LLM calls.
 - `WithMaxSteps(-1)` means unlimited loop until the model stops requesting tools.
+- `WithOnStepCommitted` runs after a complete step is assembled and before it is accepted into accumulated history or the next model call begins. Returning an error stops generation.
 - `WithToolChoice` accepts `"auto"`, `"none"`, or `"required"`.
 
 ### Tools

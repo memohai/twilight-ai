@@ -14,6 +14,7 @@ type generateConfig struct {
 	MaxSteps        int
 	OnFinish        func(*GenerateResult)
 	OnStep          func(*StepResult) *GenerateParams
+	OnStepCommitted func(ctx context.Context, stepIndex int, step *StepResult) error
 	PrepareStep     func(*GenerateParams) *GenerateParams
 	ApprovalHandler func(ctx context.Context, call ToolCall) (ToolApprovalResult, error)
 }
@@ -107,6 +108,15 @@ func WithOnFinish(fn func(*GenerateResult)) GenerateOption {
 // for the next step.
 func WithOnStep(fn func(*StepResult) *GenerateParams) GenerateOption {
 	return func(c *generateConfig) { c.OnStep = fn }
+}
+
+// WithOnStepCommitted registers a synchronous commit barrier invoked after a
+// complete step has been assembled, including tool results or a deferred
+// approval marker, and before the SDK accepts the step or starts the next model
+// call. stepIndex is zero-based. Returning an error stops generation and leaves
+// the step uncommitted.
+func WithOnStepCommitted(fn func(ctx context.Context, stepIndex int, step *StepResult) error) GenerateOption {
+	return func(c *generateConfig) { c.OnStepCommitted = fn }
 }
 
 // WithPrepareStep registers a callback invoked before each step (starting from

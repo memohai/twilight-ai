@@ -366,6 +366,18 @@ sdk.WithOnStep(func(step *sdk.StepResult) *sdk.GenerateParams {
 }),
 ```
 
+### OnStepCommitted
+
+Use a synchronous durability barrier after a complete step is assembled and
+before the next model call begins. Returning an error stops generation and
+leaves that step out of the accumulated result:
+
+```go
+sdk.WithOnStepCommitted(func(ctx context.Context, stepIndex int, step *sdk.StepResult) error {
+    return persistStep(ctx, stepIndex, step)
+}),
+```
+
 ### PrepareStep
 
 Called before each step (starting from step 2). Allows modifying params:

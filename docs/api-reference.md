@@ -356,6 +356,7 @@ All options are of type `GenerateOption` (`func(*generateConfig)`).
 | `WithMaxSteps(n int)` | `0` = single call (default), `N` = up to N calls, `-1` = unlimited |
 | `WithOnFinish(fn func(*GenerateResult))` | Called when all steps complete |
 | `WithOnStep(fn func(*StepResult) *GenerateParams)` | Called after each step; return non-nil to override next step |
+| `WithOnStepCommitted(fn func(context.Context, int, *StepResult) error)` | Synchronous commit barrier before accepting a complete step or starting the next model call |
 | `WithPrepareStep(fn func(*GenerateParams) *GenerateParams)` | Called before each step (from step 2); can modify params |
 | `WithApprovalHandler(fn func(ctx, ToolCall) (bool, error))` | Approval for tools with `RequireApproval` |
 

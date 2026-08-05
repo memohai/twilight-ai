@@ -1,6 +1,9 @@
 package sdk
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+)
 
 func buildConfig(options []GenerateOption) (*generateConfig, Provider, error) {
 	cfg := &generateConfig{}
@@ -82,6 +85,17 @@ func applyOnStep(cfg *generateConfig, stepResult *StepResult) {
 	if override := cfg.OnStep(stepResult); override != nil {
 		cfg.Params = *override
 	}
+}
+
+// applyOnStepCommitted blocks until the caller has durably accepted the step.
+func applyOnStepCommitted(ctx context.Context, cfg *generateConfig, stepIndex int, stepResult *StepResult) error {
+	if cfg.OnStepCommitted == nil {
+		return nil
+	}
+	if err := cfg.OnStepCommitted(ctx, stepIndex, stepResult); err != nil {
+		return fmt.Errorf("twilightai: commit step %d: %w", stepIndex, err)
+	}
+	return nil
 }
 
 // applyPrepareStep calls the PrepareStep callback and applies the returned override if non-nil.

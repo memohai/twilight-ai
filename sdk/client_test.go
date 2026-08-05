@@ -2,6 +2,7 @@ package sdk_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -166,8 +167,9 @@ func TestClient_NoModel(t *testing.T) {
 // ---------- mockProvider for unit tests ----------
 
 type mockProvider struct {
-	calls   int
-	handler func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error)
+	calls         int
+	handler       func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error)
+	streamHandler func(call int, params sdk.GenerateParams) (*sdk.StreamResult, error)
 }
 
 func (m *mockProvider) Name() string { return "mock" }
@@ -187,6 +189,10 @@ func (m *mockProvider) DoGenerate(_ context.Context, params sdk.GenerateParams) 
 }
 
 func (m *mockProvider) DoStream(_ context.Context, params sdk.GenerateParams) (*sdk.StreamResult, error) {
+	if m.streamHandler != nil {
+		m.calls++
+		return m.streamHandler(m.calls, params)
+	}
 	result, err := m.DoGenerate(context.Background(), params)
 	if err != nil {
 		return nil, err
@@ -1000,6 +1006,87 @@ func TestClient_StreamText_OnStepCallback(t *testing.T) {
 	defer mu.Unlock()
 	if len(steps) != 2 {
 		t.Fatalf("expected 2 step callbacks, got %d", len(steps))
+	}
+}
+
+func TestClient_OnStepCommittedErrorStopsLoop(t *testing.T) {
+	runners := []struct {
+		name string
+		run  func(...sdk.GenerateOption) error
+	}{
+		{"generate", func(opts ...sdk.GenerateOption) error {
+			_, err := sdk.GenerateTextResult(context.Background(), opts...)
+			return err
+		}},
+		{"stream", func(opts ...sdk.GenerateOption) error {
+			sr, err := sdk.StreamText(context.Background(), opts...)
+			if err != nil {
+				return err
+			}
+			_, err = sr.ToResult()
+			return err
+		}},
+	}
+
+	for _, runner := range runners {
+		t.Run(runner.name, func(t *testing.T) {
+			commitErr := errors.New("checkpoint unavailable")
+			mp := &mockProvider{handler: func(int, sdk.GenerateParams) (*sdk.GenerateResult, error) {
+				return &sdk.GenerateResult{
+					FinishReason: sdk.FinishReasonToolCalls,
+					ToolCalls:    []sdk.ToolCall{{ToolCallID: "c1", ToolName: "noop"}},
+				}, nil
+			}}
+			err := runner.run(
+				sdk.WithModel(mockModel(mp)),
+				sdk.WithTools([]sdk.Tool{{
+					Name: "noop", Parameters: &jsonschema.Schema{Type: "object"},
+					Execute: func(*sdk.ToolExecContext, any) (any, error) { return "ok", nil },
+				}}),
+				sdk.WithMaxSteps(5),
+				sdk.WithOnStepCommitted(func(_ context.Context, i int, step *sdk.StepResult) error {
+					if i != 0 || len(step.ToolResults) != 1 {
+						return fmt.Errorf("unexpected committed step %d: %#v", i, step.ToolResults)
+					}
+					return commitErr
+				}),
+			)
+			if !errors.Is(err, commitErr) {
+				t.Fatalf("error: got %v, want %v", err, commitErr)
+			}
+			if mp.calls != 1 {
+				t.Fatalf("provider calls: got %d, want 1", mp.calls)
+			}
+		})
+	}
+}
+
+func TestClient_StreamText_DoesNotCommitIncompleteStep(t *testing.T) {
+	mp := &mockProvider{streamHandler: func(int, sdk.GenerateParams) (*sdk.StreamResult, error) {
+		ch := make(chan sdk.StreamPart, 1)
+		ch <- &sdk.TextDeltaPart{ID: "partial", Text: "partial"}
+		close(ch)
+		return &sdk.StreamResult{Stream: ch}, nil
+	}}
+	committed := false
+
+	sr, err := sdk.StreamText(context.Background(),
+		sdk.WithModel(mockModel(mp)),
+		sdk.WithMaxSteps(5),
+		sdk.WithOnStepCommitted(func(context.Context, int, *sdk.StepResult) error {
+			committed = true
+			return nil
+		}),
+	)
+	if err != nil {
+		t.Fatalf("StreamText: %v", err)
+	}
+	_, err = sr.ToResult()
+	if err == nil || err.Error() != "twilightai: stream step 0 ended before finish-step" {
+		t.Fatalf("stream error: got %v", err)
+	}
+	if committed {
+		t.Fatal("incomplete step was committed")
 	}
 }
 

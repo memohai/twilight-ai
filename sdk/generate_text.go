@@ -38,6 +38,9 @@ func (c *Client) GenerateTextResult(ctx context.Context, options ...GenerateOpti
 			Response:        result.Response,
 			Messages:        stepMsgs,
 		}
+		if err := applyOnStepCommitted(ctx, cfg, 0, &step); err != nil {
+			return nil, err
+		}
 		result.Steps = []StepResult{step}
 		result.Messages = stepMsgs
 		applyOnStep(cfg, &step)
@@ -86,6 +89,9 @@ func (c *Client) GenerateTextResult(ctx context.Context, options ...GenerateOpti
 				Response:        result.Response,
 				Messages:        stepMsgs,
 			}
+			if err := applyOnStepCommitted(ctx, cfg, step, &sr); err != nil {
+				return nil, err
+			}
 			allSteps = append(allSteps, sr)
 			allMessages = append(allMessages, stepMsgs...)
 			applyOnStep(cfg, &sr)
@@ -109,6 +115,9 @@ func (c *Client) GenerateTextResult(ctx context.Context, options ...GenerateOpti
 					DeferredToolApproval: &deferred.Approval,
 					Messages:             stepMsgs,
 				}
+				if err := applyOnStepCommitted(ctx, cfg, step, &sr); err != nil {
+					return nil, err
+				}
 				allSteps = append(allSteps, sr)
 				allMessages = append(allMessages, stepMsgs...)
 				applyOnStep(cfg, &sr)
@@ -129,6 +138,9 @@ func (c *Client) GenerateTextResult(ctx context.Context, options ...GenerateOpti
 			ToolResults:     toolCallResultsFromParts(toolResults),
 			Response:        result.Response,
 			Messages:        stepMsgs,
+		}
+		if err := applyOnStepCommitted(ctx, cfg, step, &sr); err != nil {
+			return nil, err
 		}
 		allSteps = append(allSteps, sr)
 		allMessages = append(allMessages, stepMsgs...)
