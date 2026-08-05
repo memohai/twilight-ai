@@ -6,6 +6,11 @@ import (
 	"fmt"
 )
 
+// errLoopAborted signals that the stream consumer went away and the loop
+// should stop without reporting an error. Produced and consumed only by this
+// transport.
+var errLoopAborted = errors.New("twilightai: stream consumer gone")
+
 // StreamText returns a streaming result. When MaxSteps != 0 and tools have
 // Execute handlers, the client orchestrates a multi-step loop, forwarding all
 // stream parts (including ToolProgressPart) through a single channel.
@@ -23,15 +28,11 @@ func (c *Client) StreamText(ctx context.Context, options ...GenerateOption) (*St
 	if cfg.MaxSteps == 0 && cfg.OnStepCommitted == nil {
 		return prov.DoStream(ctx, cfg.Params)
 	}
-	autoExecuteTools := cfg.MaxSteps != 0
-	maxSteps := cfg.MaxSteps
-	if maxSteps == 0 {
-		maxSteps = 1
-	}
 
-	toolMap := buildToolMap(cfg.Params.Tools)
-	messages := make([]Message, len(cfg.Params.Messages))
-	copy(messages, cfg.Params.Messages)
+	// Snapshot the conversation before returning: the caller may reuse or
+	// mutate its slice after StreamText returns, and the loop goroutine must
+	// not race with that.
+	cfg.Params.Messages = append([]Message(nil), cfg.Params.Messages...)
 
 	ch := make(chan StreamPart, 64)
 	sr := &StreamResult{Stream: ch}
@@ -46,61 +47,37 @@ func (c *Client) StreamText(ctx context.Context, options ...GenerateOption) (*St
 			}
 		}
 
-		var totalUsage Usage
-		var lastFinishReason FinishReason
-		var lastRawFinishReason string
-		var allSteps []StepResult
-		var allMessages []Message
+		// The shared loop owns the state machine; this transport performs one
+		// DoStream call per step, forwarding every part to the consumer while
+		// folding them into the step outcome.
+		var st toolLoopState
 		defer func() {
-			sr.Steps = allSteps
-			sr.Messages = allMessages
-			for i := range allSteps {
-				if allSteps[i].DeferredToolApproval != nil {
-					sr.DeferredToolApproval = allSteps[i].DeferredToolApproval
-					break
-				}
-			}
+			sr.Steps = st.steps
+			sr.Messages = st.messages
+			sr.DeferredToolApproval = st.deferredToolApproval()
 			close(ch)
 		}()
 
-		for step := 0; shouldContinueLoop(maxSteps, step); step++ {
-			if step > 0 {
-				messages = applyPrepareStep(cfg, messages)
-			}
-
-			params := cfg.Params
-			params.Messages = messages
-
+		doStep := func(stepIndex int, params GenerateParams) (stepOutcome, error) {
 			provSR, err := prov.DoStream(ctx, params)
 			if err != nil {
-				send(&ErrorPart{Error: fmt.Errorf("twilightai: stream step %d: %w", step, err)})
-				return
+				return stepOutcome{}, fmt.Errorf("twilightai: stream step %d: %w", stepIndex, err)
 			}
 
-			var (
-				stepText            string
-				stepReasoning       string
-				stepReasoningMeta   map[string]any
-				stepToolCalls       []ToolCall
-				stepUsage           Usage
-				stepResponse        ResponseMetadata
-				stepFinishReason    FinishReason
-				stepRawFinishReason string
-				sawFinishStep       bool
-			)
-
+			var out stepOutcome
+			sawFinishStep := false
 			for part := range provSR.Stream {
 				switch p := part.(type) {
 				case *TextDeltaPart:
-					stepText += p.Text
+					out.text += p.Text
 				case *ReasoningDeltaPart:
-					stepReasoning += p.Text
+					out.reasoning += p.Text
 				case *ReasoningEndPart:
 					if p.ProviderMetadata != nil {
-						stepReasoningMeta = p.ProviderMetadata
+						out.reasoningMeta = p.ProviderMetadata
 					}
 				case *StreamToolCallPart:
-					stepToolCalls = append(stepToolCalls, ToolCall{
+					out.toolCalls = append(out.toolCalls, ToolCall{
 						ToolCallID:       p.ToolCallID,
 						ToolName:         p.ToolName,
 						Input:            p.Input,
@@ -108,131 +85,54 @@ func (c *Client) StreamText(ctx context.Context, options ...GenerateOption) (*St
 					})
 				case *FinishStepPart:
 					sawFinishStep = true
-					stepUsage = p.Usage
-					stepResponse = p.Response
-					stepFinishReason = p.FinishReason
-					stepRawFinishReason = p.RawFinishReason
+					out.usage = p.Usage
+					out.response = p.Response
+					out.finishReason = p.FinishReason
+					out.rawFinishReason = p.RawFinishReason
 				case *FinishPart:
-					stepFinishReason = p.FinishReason
-					stepRawFinishReason = p.RawFinishReason
+					out.finishReason = p.FinishReason
+					out.rawFinishReason = p.RawFinishReason
 					continue
 				}
 
 				if !send(part) {
-					return
+					return stepOutcome{}, errLoopAborted
 				}
 			}
 			if !sawFinishStep {
-				if ctx.Err() == nil {
-					send(&ErrorPart{Error: fmt.Errorf("twilightai: stream step %d ended before finish-step", step)})
+				if ctx.Err() != nil {
+					return stepOutcome{}, errLoopAborted
 				}
-				return
+				return stepOutcome{}, fmt.Errorf("twilightai: stream step %d ended before finish-step", stepIndex)
 			}
+			return out, nil
+		}
 
-			lastFinishReason = stepFinishReason
-			lastRawFinishReason = stepRawFinishReason
-			totalUsage = addUsage(&totalUsage, &stepUsage)
-
-			// No tool calls or not a tool-calls finish → done
-			if !autoExecuteTools || stepFinishReason != FinishReasonToolCalls || len(stepToolCalls) == 0 || !hasExecutableTools(stepToolCalls, toolMap) {
-				stepMsgs := buildStepMessages(stepText, stepReasoning, stepReasoningMeta, stepToolCalls, nil, &stepUsage)
-				stepR := StepResult{
-					Text:            stepText,
-					Reasoning:       stepReasoning,
-					FinishReason:    stepFinishReason,
-					RawFinishReason: stepRawFinishReason,
-					Usage:           stepUsage,
-					ToolCalls:       stepToolCalls,
-					Response:        stepResponse,
-					Messages:        stepMsgs,
-				}
-				if err := applyOnStepCommitted(ctx, cfg, step, &stepR); err != nil {
-					send(&ErrorPart{Error: err})
-					return
-				}
-				allSteps = append(allSteps, stepR)
-				allMessages = append(allMessages, stepMsgs...)
-				applyOnStep(cfg, &stepR)
-				break
-			}
-
-			// Execute tools
-			sendProgress := func(part StreamPart) { send(part) }
-			toolResults, err := executeTools(ctx, stepToolCalls, toolMap, cfg.ApprovalHandler, sendProgress)
-			if err != nil {
-				var deferred *ToolApprovalDeferredError
-				if errors.As(err, &deferred) {
-					stepMsgs := buildStepMessages(stepText, stepReasoning, stepReasoningMeta, stepToolCalls, nil, &stepUsage)
-					stepR := StepResult{
-						Text:                 stepText,
-						Reasoning:            stepReasoning,
-						FinishReason:         stepFinishReason,
-						RawFinishReason:      stepRawFinishReason,
-						Usage:                stepUsage,
-						ToolCalls:            stepToolCalls,
-						Response:             stepResponse,
-						DeferredToolApproval: &deferred.Approval,
-						Messages:             stepMsgs,
-					}
-					if err := applyOnStepCommitted(ctx, cfg, step, &stepR); err != nil {
-						send(&ErrorPart{Error: err})
-						return
-					}
-					allSteps = append(allSteps, stepR)
-					allMessages = append(allMessages, stepMsgs...)
-					applyOnStep(cfg, &stepR)
-					break
-				}
+		var err error
+		st, err = runToolLoop(ctx, cfg, doStep, func(part StreamPart) { send(part) })
+		if err != nil {
+			if !errors.Is(err, errLoopAborted) {
 				send(&ErrorPart{Error: err})
-				return
 			}
-
-			stepMsgs := buildStepMessages(stepText, stepReasoning, stepReasoningMeta, stepToolCalls, toolResults, &stepUsage)
-			stepR := StepResult{
-				Text:            stepText,
-				Reasoning:       stepReasoning,
-				FinishReason:    stepFinishReason,
-				RawFinishReason: stepRawFinishReason,
-				Usage:           stepUsage,
-				ToolCalls:       stepToolCalls,
-				ToolResults:     toolCallResultsFromParts(toolResults),
-				Response:        stepResponse,
-				Messages:        stepMsgs,
-			}
-			if err := applyOnStepCommitted(ctx, cfg, step, &stepR); err != nil {
-				send(&ErrorPart{Error: err})
-				return
-			}
-			allSteps = append(allSteps, stepR)
-			allMessages = append(allMessages, stepMsgs...)
-			applyOnStep(cfg, &stepR)
-
-			messages = append(messages, stepMsgs...)
+			return
 		}
 
 		if !send(&FinishPart{
-			FinishReason:    lastFinishReason,
-			RawFinishReason: lastRawFinishReason,
-			TotalUsage:      totalUsage,
+			FinishReason:    st.finishReason,
+			RawFinishReason: st.rawFinishReason,
+			TotalUsage:      st.totalUsage,
 		}) {
 			return
 		}
 
 		if cfg.OnFinish != nil {
-			var deferredToolApproval *ToolApprovalResult
-			for i := range allSteps {
-				if allSteps[i].DeferredToolApproval != nil {
-					deferredToolApproval = allSteps[i].DeferredToolApproval
-					break
-				}
-			}
 			cfg.OnFinish(&GenerateResult{
-				FinishReason:         lastFinishReason,
-				RawFinishReason:      lastRawFinishReason,
-				Usage:                totalUsage,
-				Steps:                allSteps,
-				Messages:             allMessages,
-				DeferredToolApproval: deferredToolApproval,
+				FinishReason:         st.finishReason,
+				RawFinishReason:      st.rawFinishReason,
+				Usage:                st.totalUsage,
+				Steps:                st.steps,
+				Messages:             st.messages,
+				DeferredToolApproval: st.deferredToolApproval(),
 			})
 		}
 	}()

@@ -2,7 +2,6 @@ package sdk
 
 import (
 	"context"
-	"errors"
 )
 
 func (c *Client) GenerateText(ctx context.Context, options ...GenerateOption) (string, error) {
@@ -21,145 +20,41 @@ func (c *Client) GenerateTextResult(ctx context.Context, options ...GenerateOpti
 		return nil, err
 	}
 
-	// MaxSteps == 0: single call, no tool auto-execution.
-	if cfg.MaxSteps == 0 {
-		result, err := prov.DoGenerate(ctx, cfg.Params)
-		if err != nil {
-			return nil, err
-		}
-		stepMsgs := buildStepMessages(result.Text, result.Reasoning, result.ReasoningProviderMetadata, result.ToolCalls, nil, &result.Usage)
-		step := StepResult{
-			Text:            result.Text,
-			Reasoning:       result.Reasoning,
-			FinishReason:    result.FinishReason,
-			RawFinishReason: result.RawFinishReason,
-			Usage:           result.Usage,
-			ToolCalls:       result.ToolCalls,
-			Response:        result.Response,
-			Messages:        stepMsgs,
-		}
-		if err := applyOnStepCommitted(ctx, cfg, 0, &step); err != nil {
-			return nil, err
-		}
-		result.Steps = []StepResult{step}
-		result.Messages = stepMsgs
-		applyOnStep(cfg, &step)
-		if cfg.OnFinish != nil {
-			cfg.OnFinish(result)
-		}
-		return result, nil
-	}
-
-	toolMap := buildToolMap(cfg.Params.Tools)
-	messages := make([]Message, len(cfg.Params.Messages))
-	copy(messages, cfg.Params.Messages)
-
-	var (
-		totalUsage  Usage
-		lastResult  *GenerateResult
-		allSteps    []StepResult
-		allMessages []Message
-	)
-
-	for step := 0; shouldContinueLoop(cfg.MaxSteps, step); step++ {
-		if step > 0 {
-			messages = applyPrepareStep(cfg, messages)
-		}
-
-		params := cfg.Params
-		params.Messages = messages
-
+	// The shared loop owns the state machine for every configuration —
+	// MaxSteps == 0 runs it for exactly one call with no tool execution.
+	// This transport only performs blocking provider calls and keeps the raw
+	// provider result so the final return value preserves provider-specific
+	// fields (sources, files, response metadata).
+	var lastResult *GenerateResult
+	doStep := func(_ int, params GenerateParams) (stepOutcome, error) {
 		result, err := prov.DoGenerate(ctx, params)
 		if err != nil {
-			return nil, err
+			return stepOutcome{}, err
 		}
 		lastResult = result
-		totalUsage = addUsage(&totalUsage, &result.Usage)
+		return stepOutcome{
+			text:            result.Text,
+			reasoning:       result.Reasoning,
+			reasoningMeta:   result.ReasoningProviderMetadata,
+			toolCalls:       result.ToolCalls,
+			usage:           result.Usage,
+			response:        result.Response,
+			finishReason:    result.FinishReason,
+			rawFinishReason: result.RawFinishReason,
+		}, nil
+	}
 
-		// No tool calls or not a tool-calls finish → final step
-		if result.FinishReason != FinishReasonToolCalls || len(result.ToolCalls) == 0 || !hasExecutableTools(result.ToolCalls, toolMap) {
-			stepMsgs := buildStepMessages(result.Text, result.Reasoning, result.ReasoningProviderMetadata, result.ToolCalls, nil, &result.Usage)
-			sr := StepResult{
-				Text:            result.Text,
-				Reasoning:       result.Reasoning,
-				FinishReason:    result.FinishReason,
-				RawFinishReason: result.RawFinishReason,
-				Usage:           result.Usage,
-				ToolCalls:       result.ToolCalls,
-				Response:        result.Response,
-				Messages:        stepMsgs,
-			}
-			if err := applyOnStepCommitted(ctx, cfg, step, &sr); err != nil {
-				return nil, err
-			}
-			allSteps = append(allSteps, sr)
-			allMessages = append(allMessages, stepMsgs...)
-			applyOnStep(cfg, &sr)
-			break
-		}
-
-		// Execute tools
-		toolResults, err := executeTools(ctx, result.ToolCalls, toolMap, cfg.ApprovalHandler, nil)
-		if err != nil {
-			var deferred *ToolApprovalDeferredError
-			if errors.As(err, &deferred) {
-				stepMsgs := buildStepMessages(result.Text, result.Reasoning, result.ReasoningProviderMetadata, result.ToolCalls, nil, &result.Usage)
-				sr := StepResult{
-					Text:                 result.Text,
-					Reasoning:            result.Reasoning,
-					FinishReason:         result.FinishReason,
-					RawFinishReason:      result.RawFinishReason,
-					Usage:                result.Usage,
-					ToolCalls:            result.ToolCalls,
-					Response:             result.Response,
-					DeferredToolApproval: &deferred.Approval,
-					Messages:             stepMsgs,
-				}
-				if err := applyOnStepCommitted(ctx, cfg, step, &sr); err != nil {
-					return nil, err
-				}
-				allSteps = append(allSteps, sr)
-				allMessages = append(allMessages, stepMsgs...)
-				applyOnStep(cfg, &sr)
-				result.DeferredToolApproval = &deferred.Approval
-				break
-			}
-			return nil, err
-		}
-
-		stepMsgs := buildStepMessages(result.Text, result.Reasoning, result.ReasoningProviderMetadata, result.ToolCalls, toolResults, &result.Usage)
-		sr := StepResult{
-			Text:            result.Text,
-			Reasoning:       result.Reasoning,
-			FinishReason:    result.FinishReason,
-			RawFinishReason: result.RawFinishReason,
-			Usage:           result.Usage,
-			ToolCalls:       result.ToolCalls,
-			ToolResults:     toolCallResultsFromParts(toolResults),
-			Response:        result.Response,
-			Messages:        stepMsgs,
-		}
-		if err := applyOnStepCommitted(ctx, cfg, step, &sr); err != nil {
-			return nil, err
-		}
-		allSteps = append(allSteps, sr)
-		allMessages = append(allMessages, stepMsgs...)
-		applyOnStep(cfg, &sr)
-
-		messages = append(messages, stepMsgs...)
+	st, err := runToolLoop(ctx, cfg, doStep, nil)
+	if err != nil {
+		return nil, err
 	}
 
 	if lastResult != nil {
-		lastResult.Usage = totalUsage
-		lastResult.Steps = allSteps
-		lastResult.Messages = allMessages
+		lastResult.Usage = st.totalUsage
+		lastResult.Steps = st.steps
+		lastResult.Messages = st.messages
 		if lastResult.DeferredToolApproval == nil {
-			for i := range allSteps {
-				if allSteps[i].DeferredToolApproval != nil {
-					lastResult.DeferredToolApproval = allSteps[i].DeferredToolApproval
-					break
-				}
-			}
+			lastResult.DeferredToolApproval = st.deferredToolApproval()
 		}
 	}
 
