@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/memohai/twilight-ai/sdk"
@@ -24,7 +25,7 @@ type streamProcessor struct {
 	finishStepPending  bool
 	pendingToolCalls   map[int]*streamingToolCall
 	reasoningDetails   []chatReasoningDetail
-	reasoningText      string
+	reasoningText      strings.Builder
 }
 
 func (sp *streamProcessor) send(part sdk.StreamPart) bool {
@@ -68,7 +69,7 @@ func (sp *streamProcessor) finishToolCall(stc *streamingToolCall) {
 	}
 	sp.send(&sdk.ToolInputEndPart{ID: stc.id})
 	var input any
-	if err := json.Unmarshal([]byte(stc.args), &input); err != nil {
+	if err := json.Unmarshal([]byte(stc.args.String()), &input); err != nil {
 		sp.send(&sdk.ErrorPart{Error: fmt.Errorf("openai: unmarshal tool call arguments for %q: %w", stc.name, err)})
 	}
 	sp.send(&sdk.StreamToolCallPart{
@@ -110,9 +111,11 @@ func (sp *streamProcessor) processReasoning(delta *chatChunkDelta, chunkID strin
 		return
 	}
 	if len(delta.ReasoningDetails) > 0 {
-		reasoningContent = trimReasoningPrefix(reasoningContent, sp.reasoningText)
-		sp.reasoningText += reasoningContent
-		sp.reasoningDetails = reasoningDetailsWithText(delta.ReasoningDetails, sp.reasoningText)
+		// Builder.String() is a zero-copy view, so the per-delta reads below
+		// stay O(1) while appends stay amortized O(1).
+		reasoningContent = trimReasoningPrefix(reasoningContent, sp.reasoningText.String())
+		sp.reasoningText.WriteString(reasoningContent)
+		sp.reasoningDetails = reasoningDetailsWithText(delta.ReasoningDetails, sp.reasoningText.String())
 	}
 	if reasoningContent == "" {
 		return
@@ -178,13 +181,13 @@ func (sp *streamProcessor) processToolCallDeltas(toolCalls []chatToolCallChunk, 
 			})
 		}
 		if tc.Function.Arguments != "" {
-			stc.args += tc.Function.Arguments
+			stc.args.WriteString(tc.Function.Arguments)
 			sp.send(&sdk.ToolInputDeltaPart{
 				ID:    stc.id,
 				Delta: tc.Function.Arguments,
 			})
 
-			if !stc.finished && json.Valid([]byte(stc.args)) {
+			if !stc.finished && json.Valid([]byte(stc.args.String())) {
 				sp.finishToolCall(stc)
 			}
 		}

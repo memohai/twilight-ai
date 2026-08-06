@@ -653,7 +653,7 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 				if stc == nil {
 					return nil
 				}
-				stc.args += chunk.Delta
+				stc.args.WriteString(chunk.Delta)
 				send(&sdk.ToolInputDeltaPart{
 					ID:    stc.id,
 					Delta: chunk.Delta,
@@ -682,7 +682,7 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 						send(&sdk.ToolInputEndPart{ID: stc.id})
 						args := chunk.Item.Arguments
 						if args == "" {
-							args = stc.args
+							args = stc.args.String()
 						}
 						var input any
 						if err := json.Unmarshal([]byte(args), &input); err != nil {

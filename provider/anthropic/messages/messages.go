@@ -815,7 +815,7 @@ func (h *streamHandler) onBlockDelta(event *streamEvent) {
 		h.send(&sdk.ReasoningDeltaPart{ID: h.messageID, Text: delta.Thinking})
 	case "input_json_delta":
 		if sb != nil {
-			sb.args += delta.PartialJSON
+			sb.args.WriteString(delta.PartialJSON)
 			h.send(&sdk.ToolInputDeltaPart{
 				ID:    sb.toolID,
 				Delta: delta.PartialJSON,
@@ -823,7 +823,7 @@ func (h *streamHandler) onBlockDelta(event *streamEvent) {
 		}
 	case "signature_delta":
 		if sb != nil {
-			sb.signature += delta.Signature
+			sb.signature.WriteString(delta.Signature)
 		}
 	}
 }
@@ -844,17 +844,17 @@ func (h *streamHandler) onBlockStop(event *streamEvent) {
 		h.send(&sdk.TextEndPart{ID: h.messageID})
 	case blockTypeThinking:
 		var meta map[string]any
-		if sb.signature != "" {
+		if sb.signature.Len() > 0 {
 			meta = map[string]any{
-				"anthropic": map[string]any{"signature": sb.signature},
+				"anthropic": map[string]any{"signature": sb.signature.String()},
 			}
 		}
 		h.send(&sdk.ReasoningEndPart{ID: h.messageID, ProviderMetadata: meta})
 	case blockTypeToolUse:
 		h.send(&sdk.ToolInputEndPart{ID: sb.toolID})
 		var input any
-		if sb.args != "" {
-			if err := json.Unmarshal([]byte(sb.args), &input); err != nil {
+		if sb.args.Len() > 0 {
+			if err := json.Unmarshal([]byte(sb.args.String()), &input); err != nil {
 				h.send(&sdk.ErrorPart{Error: fmt.Errorf("anthropic: unmarshal tool args for %q: %w", sb.toolName, err)})
 			}
 		}
@@ -894,12 +894,17 @@ func (h *streamHandler) onError(event *streamEvent) {
 	h.send(&sdk.ErrorPart{Error: fmt.Errorf("anthropic: stream error: %s", errMsg)})
 }
 
+// streamingBlock accumulates one content block's deltas. args and signature
+// grow by one small delta per SSE event, so they use strings.Builder — plain
+// string concatenation would copy the accumulated prefix on every event,
+// quadratic in the payload size. Blocks are always held by pointer
+// (activeBlocks map), which the Builders' no-copy requirement relies on.
 type streamingBlock struct {
 	blockType string
 	toolID    string
 	toolName  string
-	args      string
-	signature string
+	args      strings.Builder
+	signature strings.Builder
 }
 
 // ---------- helpers ----------

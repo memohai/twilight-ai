@@ -65,7 +65,7 @@ func (sp *streamProcessor) finishToolCall(stc *streamingToolCall) {
 	}
 	sp.send(&sdk.ToolInputEndPart{ID: stc.id})
 	var input any
-	if err := json.Unmarshal([]byte(stc.args), &input); err != nil {
+	if err := json.Unmarshal([]byte(stc.args.String()), &input); err != nil {
 		sp.send(&sdk.ErrorPart{Error: fmt.Errorf("github-copilot: unmarshal tool call arguments for %q: %w", stc.name, err)})
 	}
 	sp.send(&sdk.StreamToolCallPart{
@@ -148,13 +148,13 @@ func (sp *streamProcessor) processToolCallDeltas(toolCalls []chatToolCallChunk, 
 			})
 		}
 		if tc.Function.Arguments != "" {
-			stc.args += tc.Function.Arguments
+			stc.args.WriteString(tc.Function.Arguments)
 			sp.send(&sdk.ToolInputDeltaPart{
 				ID:    stc.id,
 				Delta: tc.Function.Arguments,
 			})
 
-			if !stc.finished && json.Valid([]byte(stc.args)) {
+			if !stc.finished && json.Valid([]byte(stc.args.String())) {
 				sp.finishToolCall(stc)
 			}
 		}

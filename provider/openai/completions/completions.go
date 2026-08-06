@@ -616,10 +616,13 @@ func (p *Provider) authHeaders() map[string]string {
 	return utils.AuthHeader(p.apiKey)
 }
 
+// streamingToolCall accumulates one function call's argument deltas. args
+// uses strings.Builder because it grows by one small delta per SSE event;
+// instances are always held by pointer (pendingToolCalls map).
 type streamingToolCall struct {
 	id       string
 	name     string
-	args     string
+	args     strings.Builder
 	finished bool
 }
 
