@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // errLoopAborted signals that the stream consumer went away and the loop
@@ -69,14 +70,17 @@ func (c *Client) StreamText(ctx context.Context, options ...GenerateOption) (*St
 				return stepOutcome{}, fmt.Errorf("twilightai: stream step %d: %w", stepIndex, err)
 			}
 
+			// Accumulate delta text in local builders: stepOutcome is passed
+			// by value and strings.Builder must not be copied after use.
 			var out stepOutcome
+			var text, reasoning strings.Builder
 			sawFinishStep := false
 			for part := range provSR.Stream {
 				switch p := part.(type) {
 				case *TextDeltaPart:
-					out.text += p.Text
+					text.WriteString(p.Text)
 				case *ReasoningDeltaPart:
-					out.reasoning += p.Text
+					reasoning.WriteString(p.Text)
 				case *ReasoningEndPart:
 					if p.ProviderMetadata != nil {
 						out.reasoningMeta = p.ProviderMetadata
@@ -110,6 +114,8 @@ func (c *Client) StreamText(ctx context.Context, options ...GenerateOption) (*St
 				}
 				return stepOutcome{}, fmt.Errorf("twilightai: stream step %d ended before finish-step", stepIndex)
 			}
+			out.text = text.String()
+			out.reasoning = reasoning.String()
 			return out, nil
 		}
 
