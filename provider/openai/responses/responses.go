@@ -328,6 +328,7 @@ func convertResponsesAssistantMessage(msg sdk.Message) []json.RawMessage {
 	var textParts []responsesOutputTextPart
 	var reasoningSummary []responsesReasoningSummaryText
 	var encryptedContent string
+	var reasoningItemID string
 
 	for _, part := range msg.Content {
 		switch p := part.(type) {
@@ -342,8 +343,12 @@ func convertResponsesAssistantMessage(msg sdk.Message) []json.RawMessage {
 				Type: "summary_text",
 				Text: p.Text,
 			})
-			if ec := extractOpenAIEncryptedContent(p.ProviderMetadata); ec != "" {
+			ec, itemID := extractOpenAIReasoningMetadata(p.ProviderMetadata)
+			if ec != "" {
 				encryptedContent = ec
+			}
+			if itemID != "" {
+				reasoningItemID = itemID
 			}
 
 		case sdk.ToolCallPart:
@@ -365,8 +370,9 @@ func convertResponsesAssistantMessage(msg sdk.Message) []json.RawMessage {
 	}
 
 	var prefix []json.RawMessage
-	if len(reasoningSummary) > 0 {
+	if len(reasoningSummary) > 0 || encryptedContent != "" || reasoningItemID != "" {
 		ri := responsesReasoningItem{
+			ID:               reasoningItemID,
 			Type:             "reasoning",
 			Summary:          reasoningSummary,
 			EncryptedContent: encryptedContent,
@@ -741,6 +747,25 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 
 				return utils.ErrStreamDone
 
+			case "response.failed":
+				var chunk responsesFailedChunk
+				if err := json.Unmarshal([]byte(ev.Data), &chunk); err != nil {
+					return nil
+				}
+				if chunk.Response.Usage != nil {
+					usage = convertResponsesUsage(chunk.Response.Usage)
+				}
+				if chunk.Response.Error == nil {
+					send(&sdk.ErrorPart{Error: fmt.Errorf("openai-responses: response failed")})
+				} else {
+					send(&sdk.ErrorPart{Error: fmt.Errorf(
+						"openai-responses: %s: %s",
+						chunk.Response.Error.Code,
+						chunk.Response.Error.Message,
+					)})
+				}
+				return utils.ErrStreamDone
+
 			case "error":
 				var chunk responsesErrorChunk
 				if err := json.Unmarshal([]byte(ev.Data), &chunk); err != nil {
@@ -826,16 +851,17 @@ func convertResponsesUsage(u *responsesUsage) sdk.Usage {
 	}
 }
 
-func extractOpenAIEncryptedContent(meta map[string]any) string {
+func extractOpenAIReasoningMetadata(meta map[string]any) (encryptedContent, itemID string) {
 	if meta == nil {
-		return ""
+		return "", ""
 	}
 	om, ok := meta["openai"].(map[string]any)
 	if !ok {
-		return ""
+		return "", ""
 	}
-	ec, _ := om["reasoningEncryptedContent"].(string)
-	return ec
+	encryptedContent, _ = om["reasoningEncryptedContent"].(string)
+	itemID, _ = om["itemId"].(string)
+	return encryptedContent, itemID
 }
 
 func textFromParts(parts []sdk.MessagePart) string {

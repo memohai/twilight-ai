@@ -90,6 +90,7 @@ type responsesReasoningSummaryText struct {
 }
 
 type responsesReasoningItem struct {
+	ID               string                          `json:"id,omitempty"`
 	Type             string                          `json:"type"`
 	Summary          []responsesReasoningSummaryText `json:"summary"`
 	EncryptedContent string                          `json:"encrypted_content,omitempty"`
@@ -241,6 +242,15 @@ type responsesCompletedChunk struct {
 	Response struct {
 		IncompleteDetails *incompleteDetails `json:"incomplete_details,omitempty"`
 		Usage             *responsesUsage    `json:"usage,omitempty"`
+	} `json:"response"`
+}
+
+// responsesFailedChunk is sent for event: response.failed.
+type responsesFailedChunk struct {
+	Type     string `json:"type"`
+	Response struct {
+		Error *responsesError `json:"error,omitempty"`
+		Usage *responsesUsage `json:"usage,omitempty"`
 	} `json:"response"`
 }
 
