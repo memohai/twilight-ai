@@ -2,12 +2,24 @@ package sdk
 
 import (
 	"context"
+	"errors"
 )
+
+// ErrRunPaused is returned by GenerateText when the run stopped on deferred
+// tool approvals. The string helper has no way to hand back the pause;
+// callers that use deferred approvals must call GenerateTextResult (or
+// StreamText) and read Result.Pause.
+var ErrRunPaused = errors.New("twilightai: run paused on deferred tool approvals; use GenerateTextResult to obtain the pause")
 
 func (c *Client) GenerateText(ctx context.Context, options ...GenerateOption) (string, error) {
 	result, err := c.GenerateTextResult(ctx, options...)
 	if err != nil {
 		return "", err
+	}
+	// A pause is a resumable state, not a completion: swallowing it here
+	// would strand the pending approvals with no signal to the caller.
+	if result.FinishReason == FinishReasonPaused {
+		return "", ErrRunPaused
 	}
 	return result.Text, nil
 }
@@ -53,9 +65,8 @@ func (c *Client) GenerateTextResult(ctx context.Context, options ...GenerateOpti
 		lastResult.Usage = st.totalUsage
 		lastResult.Steps = st.steps
 		lastResult.Messages = st.messages
-		if lastResult.DeferredToolApproval == nil {
-			lastResult.DeferredToolApproval = st.deferredToolApproval()
-		}
+		lastResult.FinishReason = st.finishReason
+		lastResult.Pause = st.pause()
 	}
 
 	if cfg.OnFinish != nil && lastResult != nil {

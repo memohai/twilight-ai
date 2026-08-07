@@ -234,8 +234,10 @@ type StreamResult struct {
 	Steps []StepResult
 	// Messages holds all output messages across all steps (assistant + tool),
 	// excluding the original input messages. Populated as the stream is consumed.
-	Messages             []Message
-	DeferredToolApproval *ToolApprovalResult
+	Messages []Message
+	// Pause is set when the run stopped on deferred tool approvals. It is the
+	// portable resume state; populated once the stream is fully consumed.
+	Pause *ToolApprovalPause
 }
 
 // Text consumes the entire stream and returns the concatenated text content.
@@ -256,7 +258,12 @@ func (sr *StreamResult) Text() (string, error) {
 func (sr *StreamResult) ToResult() (*GenerateResult, error) {
 	result := &GenerateResult{}
 	var reasoning string
+	var streamErr error
 
+	// Drain the stream to the end even after an error: the producer
+	// publishes Steps/Messages/Pause before closing, and a caller on the
+	// error path still needs them (e.g. to persist a pause whose approval
+	// requests were already announced).
 	for part := range sr.Stream {
 		switch p := part.(type) {
 		case *TextDeltaPart:
@@ -288,13 +295,15 @@ func (sr *StreamResult) ToResult() (*GenerateResult, error) {
 			result.RawFinishReason = p.RawFinishReason
 			result.Usage = p.TotalUsage
 		case *ErrorPart:
-			return result, p.Error
+			if streamErr == nil {
+				streamErr = p.Error
+			}
 		}
 	}
 
 	result.Reasoning = reasoning
 	result.Steps = sr.Steps
 	result.Messages = sr.Messages
-	result.DeferredToolApproval = sr.DeferredToolApproval
-	return result, nil
+	result.Pause = sr.Pause
+	return result, streamErr
 }

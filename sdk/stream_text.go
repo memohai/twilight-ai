@@ -51,12 +51,17 @@ func (c *Client) StreamText(ctx context.Context, options ...GenerateOption) (*St
 		// DoStream call per step, forwarding every part to the consumer while
 		// folding them into the step outcome.
 		var st toolLoopState
-		defer func() {
+		defer close(ch)
+		// publish exposes the loop's results on sr. It runs before FinishPart
+		// is sent so a consumer reading sr.Pause at the in-band end-of-stream
+		// signal observes the populated fields, and again on error paths.
+		publish := func() *ToolApprovalPause {
+			pause := st.pause()
 			sr.Steps = st.steps
 			sr.Messages = st.messages
-			sr.DeferredToolApproval = st.deferredToolApproval()
-			close(ch)
-		}()
+			sr.Pause = pause
+			return pause
+		}
 
 		doStep := func(stepIndex int, params GenerateParams) (stepOutcome, error) {
 			provSR, err := prov.DoStream(ctx, params)
@@ -110,6 +115,7 @@ func (c *Client) StreamText(ctx context.Context, options ...GenerateOption) (*St
 
 		var err error
 		st, err = runToolLoop(ctx, cfg, doStep, func(part StreamPart) { send(part) })
+		pause := publish()
 		if err != nil {
 			if !errors.Is(err, errLoopAborted) {
 				send(&ErrorPart{Error: err})
@@ -127,12 +133,12 @@ func (c *Client) StreamText(ctx context.Context, options ...GenerateOption) (*St
 
 		if cfg.OnFinish != nil {
 			cfg.OnFinish(&GenerateResult{
-				FinishReason:         st.finishReason,
-				RawFinishReason:      st.rawFinishReason,
-				Usage:                st.totalUsage,
-				Steps:                st.steps,
-				Messages:             st.messages,
-				DeferredToolApproval: st.deferredToolApproval(),
+				FinishReason:    st.finishReason,
+				RawFinishReason: st.rawFinishReason,
+				Usage:           st.totalUsage,
+				Steps:           st.steps,
+				Messages:        st.messages,
+				Pause:           pause,
 			})
 		}
 	}()
