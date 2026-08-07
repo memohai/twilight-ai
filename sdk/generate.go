@@ -14,8 +14,8 @@ const (
 	FinishReasonUnknown       FinishReason = "unknown"
 	// FinishReasonPaused is reported on the overall result when the run
 	// stopped because one or more tool calls are awaiting a user decision
-	// (see DeferredToolApprovals). Individual steps keep the provider's
-	// finish reason; only the run-level result carries this value.
+	// (see Result.Pause). Individual steps keep the provider's finish
+	// reason; only the run-level result carries this value.
 	FinishReasonPaused FinishReason = "paused"
 )
 
@@ -92,6 +92,9 @@ type GenerateResult struct {
 	// (FinishReason == FinishReasonPaused). It is the portable resume state:
 	// hand it to ResumeText / ApplyToolDecisions with the user's decisions.
 	Pause *ToolApprovalPause `json:"pause,omitempty"`
+	// Resume reports the decisions applied before the first model call when
+	// the run was started by ResumeText / ResumeTextStream.
+	Resume *ToolApprovalResolution `json:"resume,omitempty"`
 	// Steps holds the result of each step in a multi-step execution.
 	Steps []StepResult `json:"steps,omitempty"`
 	// Messages holds all output messages across all steps (assistant + tool),

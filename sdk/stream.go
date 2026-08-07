@@ -1,5 +1,7 @@
 package sdk
 
+import "strings"
+
 type StreamPartType string
 
 const (
@@ -238,26 +240,29 @@ type StreamResult struct {
 	// Pause is set when the run stopped on deferred tool approvals. It is the
 	// portable resume state; populated once the stream is fully consumed.
 	Pause *ToolApprovalPause
+	// Resume reports the decisions applied before the stream opened when the
+	// run was started by ResumeTextStream. Available immediately.
+	Resume *ToolApprovalResolution
 }
 
 // Text consumes the entire stream and returns the concatenated text content.
 func (sr *StreamResult) Text() (string, error) {
-	var text string
+	var text strings.Builder
 	for part := range sr.Stream {
 		switch p := part.(type) {
 		case *TextDeltaPart:
-			text += p.Text
+			text.WriteString(p.Text)
 		case *ErrorPart:
-			return text, p.Error
+			return text.String(), p.Error
 		}
 	}
-	return text, nil
+	return text.String(), nil
 }
 
 // ToResult consumes the entire stream and assembles a GenerateResult.
 func (sr *StreamResult) ToResult() (*GenerateResult, error) {
 	result := &GenerateResult{}
-	var reasoning string
+	var text, reasoning strings.Builder
 	var streamErr error
 
 	// Drain the stream to the end even after an error: the producer
@@ -267,9 +272,9 @@ func (sr *StreamResult) ToResult() (*GenerateResult, error) {
 	for part := range sr.Stream {
 		switch p := part.(type) {
 		case *TextDeltaPart:
-			result.Text += p.Text
+			text.WriteString(p.Text)
 		case *ReasoningDeltaPart:
-			reasoning += p.Text
+			reasoning.WriteString(p.Text)
 		case *StreamToolCallPart:
 			result.ToolCalls = append(result.ToolCalls, ToolCall{
 				ToolCallID:       p.ToolCallID,
@@ -301,9 +306,11 @@ func (sr *StreamResult) ToResult() (*GenerateResult, error) {
 		}
 	}
 
-	result.Reasoning = reasoning
+	result.Text = text.String()
+	result.Reasoning = reasoning.String()
 	result.Steps = sr.Steps
 	result.Messages = sr.Messages
 	result.Pause = sr.Pause
+	result.Resume = sr.Resume
 	return result, streamErr
 }
