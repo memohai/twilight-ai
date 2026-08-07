@@ -1065,6 +1065,39 @@ func TestResponsesDoStream_ErrorEvent(t *testing.T) {
 	}
 }
 
+func TestResponsesDoStream_ResponseFailed(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "event: response.failed\n")
+		fmt.Fprint(w, `data: {"type":"response.failed","response":{"status":"failed","error":{"type":"server_error","code":"server_error","message":"generation failed"},"usage":{"input_tokens":7,"output_tokens":2}}}`)
+		fmt.Fprint(w, "\n\n")
+		w.(http.Flusher).Flush()
+	}))
+	defer srv.Close()
+
+	p := responses.New(responses.WithAPIKey("k"), responses.WithBaseURL(srv.URL))
+	sr, err := p.DoStream(context.Background(), sdk.GenerateParams{
+		Model:    p.ChatModel("gpt-5.6"),
+		Messages: []sdk.Message{sdk.UserMessage("test")},
+	})
+	if err != nil {
+		t.Fatalf("DoStream: %v", err)
+	}
+
+	var gotError bool
+	for part := range sr.Stream {
+		if errorPart, ok := part.(*sdk.ErrorPart); ok {
+			gotError = true
+			if !strings.Contains(errorPart.Error.Error(), "generation failed") {
+				t.Fatalf("error = %q, want generation failure", errorPart.Error)
+			}
+		}
+	}
+	if !gotError {
+		t.Fatal("expected ErrorPart from response.failed")
+	}
+}
+
 // ---------- input conversion tests ----------
 
 func TestResponsesInputConversion_SystemMessage(t *testing.T) {
@@ -1191,6 +1224,7 @@ func TestResponsesInputConversion_AssistantReasoning(t *testing.T) {
 		}
 
 		var reasoning struct {
+			ID      string `json:"id"`
 			Type    string `json:"type"`
 			Summary []struct {
 				Type string `json:"type"`
@@ -1200,6 +1234,9 @@ func TestResponsesInputConversion_AssistantReasoning(t *testing.T) {
 		json.Unmarshal(body.Input[1], &reasoning)
 		if reasoning.Type != "reasoning" {
 			t.Errorf("input[1] type: got %q, want reasoning", reasoning.Type)
+		}
+		if reasoning.ID != "rs_123" {
+			t.Errorf("input[1] id: got %q, want rs_123", reasoning.ID)
 		}
 		if len(reasoning.Summary) != 1 || reasoning.Summary[0].Text != "I thought carefully" {
 			t.Errorf("reasoning summary: %+v", reasoning.Summary)
@@ -1240,7 +1277,15 @@ func TestResponsesInputConversion_AssistantReasoning(t *testing.T) {
 			{
 				Role: sdk.MessageRoleAssistant,
 				Content: []sdk.MessagePart{
-					sdk.ReasoningPart{Text: "I thought carefully"},
+					sdk.ReasoningPart{
+						Text: "I thought carefully",
+						ProviderMetadata: map[string]any{
+							"openai": map[string]any{
+								"itemId":                    "rs_123",
+								"reasoningEncryptedContent": "encrypted-reasoning",
+							},
+						},
+					},
 					sdk.TextPart{Text: "The answer"},
 				},
 			},
@@ -1248,6 +1293,50 @@ func TestResponsesInputConversion_AssistantReasoning(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("DoGenerate: %v", err)
+	}
+}
+
+func TestResponsesInputConversion_ReplaysOpaqueReasoningWithoutSummary(t *testing.T) {
+	var captured struct {
+		Input []json.RawMessage `json:"input"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"id":"resp_1","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1}}`)
+	}))
+	defer srv.Close()
+
+	p := responses.New(responses.WithAPIKey("k"), responses.WithBaseURL(srv.URL))
+	_, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model: p.ChatModel("gpt-5.6"),
+		Messages: []sdk.Message{{
+			Role: sdk.MessageRoleAssistant,
+			Content: []sdk.MessagePart{sdk.ReasoningPart{ProviderMetadata: map[string]any{
+				"openai": map[string]any{
+					"itemId":                    "rs_opaque",
+					"reasoningEncryptedContent": "encrypted-only",
+				},
+			}}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate: %v", err)
+	}
+	if len(captured.Input) != 1 {
+		t.Fatalf("input length = %d, want 1", len(captured.Input))
+	}
+	var reasoning struct {
+		ID               string `json:"id"`
+		EncryptedContent string `json:"encrypted_content"`
+	}
+	if err := json.Unmarshal(captured.Input[0], &reasoning); err != nil {
+		t.Fatalf("decode reasoning item: %v", err)
+	}
+	if reasoning.ID != "rs_opaque" || reasoning.EncryptedContent != "encrypted-only" {
+		t.Fatalf("reasoning item = %+v", reasoning)
 	}
 }
 
