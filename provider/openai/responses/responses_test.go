@@ -862,11 +862,11 @@ func TestResponsesDoStream_Reasoning(t *testing.T) {
 			},
 			{
 				"response.reasoning_summary_text.delta",
-				`{"type":"response.reasoning_summary_text.delta","item_id":"rs_010","summary_index":0,"delta":"Think"}`,
+				`{"type":"response.reasoning_summary_text.delta","item_id":"rs_010","summary_index":0,"delta":"Summary"}`,
 			},
 			{
-				"response.reasoning_summary_text.delta",
-				`{"type":"response.reasoning_summary_text.delta","item_id":"rs_010","summary_index":0,"delta":"ing..."}`,
+				"response.reasoning_text.delta",
+				`{"type":"response.reasoning_text.delta","item_id":"rs_010","delta":"Raw"}`,
 			},
 			{
 				"response.output_item.done",
@@ -874,7 +874,19 @@ func TestResponsesDoStream_Reasoning(t *testing.T) {
 			},
 			{
 				"response.output_item.added",
-				`{"type":"response.output_item.added","output_index":1,"item":{"type":"message","id":"msg_020"}}`,
+				`{"type":"response.output_item.added","output_index":1,"item":{"type":"reasoning","id":"rs_011"}}`,
+			},
+			{
+				"response.reasoning_summary_text.delta",
+				`{"type":"response.reasoning_summary_text.delta","item_id":"rs_011","summary_index":0,"delta":"SecondSummary"}`,
+			},
+			{
+				"response.output_item.done",
+				`{"type":"response.output_item.done","output_index":1,"item":{"type":"reasoning","id":"rs_011"}}`,
+			},
+			{
+				"response.output_item.added",
+				`{"type":"response.output_item.added","output_index":2,"item":{"type":"message","id":"msg_020"}}`,
 			},
 			{
 				"response.output_text.delta",
@@ -882,7 +894,7 @@ func TestResponsesDoStream_Reasoning(t *testing.T) {
 			},
 			{
 				"response.output_item.done",
-				`{"type":"response.output_item.done","output_index":1,"item":{"type":"message","id":"msg_020"}}`,
+				`{"type":"response.output_item.done","output_index":2,"item":{"type":"message","id":"msg_020"}}`,
 			},
 			{
 				"response.completed",
@@ -907,17 +919,17 @@ func TestResponsesDoStream_Reasoning(t *testing.T) {
 	}
 
 	var reasoning, text string
-	var gotReasoningStart, gotReasoningEnd bool
+	var reasoningStartIDs, reasoningEndIDs []string
 	events := make([]sdk.StreamPartType, 0, 8)
 	for part := range sr.Stream {
 		events = append(events, part.Type())
 		switch p := part.(type) {
 		case *sdk.ReasoningStartPart:
-			gotReasoningStart = true
+			reasoningStartIDs = append(reasoningStartIDs, p.ID)
 		case *sdk.ReasoningDeltaPart:
 			reasoning += p.Text
 		case *sdk.ReasoningEndPart:
-			gotReasoningEnd = true
+			reasoningEndIDs = append(reasoningEndIDs, p.ID)
 		case *sdk.TextDeltaPart:
 			text += p.Text
 		case *sdk.FinishPart:
@@ -929,14 +941,14 @@ func TestResponsesDoStream_Reasoning(t *testing.T) {
 		}
 	}
 
-	if !gotReasoningStart {
-		t.Error("missing ReasoningStartPart")
+	if got := strings.Join(reasoningStartIDs, ","); got != "rs_010,rs_011" {
+		t.Errorf("reasoning start IDs: got %q, want %q", got, "rs_010,rs_011")
 	}
-	if !gotReasoningEnd {
-		t.Error("missing ReasoningEndPart")
+	if got := strings.Join(reasoningEndIDs, ","); got != "rs_010,rs_011" {
+		t.Errorf("reasoning end IDs: got %q, want %q", got, "rs_010,rs_011")
 	}
-	if reasoning != "Thinking..." {
-		t.Errorf("reasoning: got %q, want %q", reasoning, "Thinking...")
+	if reasoning != "SummaryRawSecondSummary" {
+		t.Errorf("reasoning: got %q, want %q", reasoning, "SummaryRawSecondSummary")
 	}
 	if text != "The answer is 4." {
 		t.Errorf("text: got %q", text)
@@ -955,6 +967,39 @@ func TestResponsesDoStream_Reasoning(t *testing.T) {
 	}
 	if reasoningEndIdx >= textStartIdx {
 		t.Errorf("reasoning-end (idx %d) should come before text-start (idx %d)", reasoningEndIdx, textStartIdx)
+	}
+}
+
+func TestResponsesDoStream_ReasoningKeepsItemIDOnFinalFlush(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_flush\",\"created_at\":1700000000,\"model\":\"grok-4\"}}\n\n")
+		fmt.Fprint(w, "event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"rs_flush\"}}\n\n")
+		fmt.Fprint(w, "event: response.reasoning_text.delta\ndata: {\"type\":\"response.reasoning_text.delta\",\"item_id\":\"rs_flush\",\"delta\":\"Thinking\"}\n\n")
+		fmt.Fprint(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n")
+	}))
+	defer srv.Close()
+
+	p := responses.New(responses.WithAPIKey("k"), responses.WithBaseURL(srv.URL))
+	sr, err := p.DoStream(context.Background(), sdk.GenerateParams{
+		Model:    p.ChatModel("grok-4"),
+		Messages: []sdk.Message{sdk.UserMessage("hi")},
+	})
+	if err != nil {
+		t.Fatalf("DoStream: %v", err)
+	}
+
+	var endID string
+	for part := range sr.Stream {
+		switch part := part.(type) {
+		case *sdk.ReasoningEndPart:
+			endID = part.ID
+		case *sdk.ErrorPart:
+			t.Fatalf("error: %v", part.Error)
+		}
+	}
+	if endID != "rs_flush" {
+		t.Fatalf("reasoning end ID: got %q, want %q", endID, "rs_flush")
 	}
 }
 

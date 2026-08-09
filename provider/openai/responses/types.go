@@ -221,12 +221,11 @@ type responsesFuncArgsDeltaChunk struct {
 	Delta       string `json:"delta"`
 }
 
-// responsesReasoningSummaryDeltaChunk is sent for event: response.reasoning_summary_text.delta
-type responsesReasoningSummaryDeltaChunk struct {
-	Type         string `json:"type"`
-	ItemID       string `json:"item_id"`
-	SummaryIndex int    `json:"summary_index"`
-	Delta        string `json:"delta"`
+// responsesReasoningDeltaChunk is sent for reasoning delta events.
+type responsesReasoningDeltaChunk struct {
+	Type   string `json:"type"`
+	ItemID string `json:"item_id"`
+	Delta  string `json:"delta"`
 }
 
 // responsesAnnotationAddedChunk is sent for event: response.output_text.annotation.added

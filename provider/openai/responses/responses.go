@@ -513,8 +513,8 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 			incompleteReason string
 			hasFunctionCall  bool
 
-			textStartSent      bool
-			reasoningStartSent bool
+			textStartSent     bool
+			activeReasoningID string
 
 			// Track ongoing function calls by output_index
 			pendingToolCalls = map[int]*streamingToolCall{}
@@ -529,11 +529,25 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 			}
 		}
 
-		flush := func() {
-			if reasoningStartSent {
-				send(&sdk.ReasoningEndPart{ID: responseID})
-				reasoningStartSent = false
+		endReasoning := func() {
+			if activeReasoningID == "" {
+				return
 			}
+			send(&sdk.ReasoningEndPart{ID: activeReasoningID})
+			activeReasoningID = ""
+		}
+
+		startReasoning := func(id string, meta map[string]any) {
+			if activeReasoningID == id {
+				return
+			}
+			endReasoning()
+			send(&sdk.ReasoningStartPart{ID: id, ProviderMetadata: meta})
+			activeReasoningID = id
+		}
+
+		flush := func() {
+			endReasoning()
 			if textStartSent {
 				send(&sdk.TextEndPart{ID: responseID})
 				textStartSent = false
@@ -588,24 +602,18 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 						textStartSent = true
 					}
 				case outputTypeReasoning:
-					if !reasoningStartSent {
-						var meta map[string]any
-						if chunk.Item.EncryptedContent != "" {
-							meta = map[string]any{
-								"openai": map[string]any{
-									"reasoningEncryptedContent": chunk.Item.EncryptedContent,
-									"itemId":                    chunk.Item.ID,
-								},
-							}
+					var meta map[string]any
+					if chunk.Item.EncryptedContent != "" {
+						meta = map[string]any{
+							"openai": map[string]any{
+								"reasoningEncryptedContent": chunk.Item.EncryptedContent,
+								"itemId":                    chunk.Item.ID,
+							},
 						}
-						send(&sdk.ReasoningStartPart{ID: chunk.Item.ID, ProviderMetadata: meta})
-						reasoningStartSent = true
 					}
+					startReasoning(chunk.Item.ID, meta)
 				case outputTypeFunctionCall:
-					if reasoningStartSent {
-						send(&sdk.ReasoningEndPart{ID: responseID})
-						reasoningStartSent = false
-					}
+					endReasoning()
 					if textStartSent {
 						send(&sdk.TextEndPart{ID: responseID})
 						textStartSent = false
@@ -629,25 +637,19 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 				if err := json.Unmarshal([]byte(ev.Data), &chunk); err != nil {
 					return nil
 				}
-				if reasoningStartSent {
-					send(&sdk.ReasoningEndPart{ID: responseID})
-					reasoningStartSent = false
-				}
+				endReasoning()
 				if !textStartSent {
 					send(&sdk.TextStartPart{ID: chunk.ItemID})
 					textStartSent = true
 				}
 				send(&sdk.TextDeltaPart{ID: chunk.ItemID, Text: chunk.Delta})
 
-			case "response.reasoning_summary_text.delta":
-				var chunk responsesReasoningSummaryDeltaChunk
+			case "response.reasoning_text.delta", "response.reasoning_summary_text.delta":
+				var chunk responsesReasoningDeltaChunk
 				if err := json.Unmarshal([]byte(ev.Data), &chunk); err != nil {
 					return nil
 				}
-				if !reasoningStartSent {
-					send(&sdk.ReasoningStartPart{ID: chunk.ItemID})
-					reasoningStartSent = true
-				}
+				startReasoning(chunk.ItemID, nil)
 				send(&sdk.ReasoningDeltaPart{ID: chunk.ItemID, Text: chunk.Delta})
 
 			case "response.function_call_arguments.delta":
@@ -677,9 +679,8 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 						textStartSent = false
 					}
 				case outputTypeReasoning:
-					if reasoningStartSent {
-						send(&sdk.ReasoningEndPart{ID: chunk.Item.ID})
-						reasoningStartSent = false
+					if activeReasoningID == chunk.Item.ID {
+						endReasoning()
 					}
 				case outputTypeFunctionCall:
 					hasFunctionCall = true
