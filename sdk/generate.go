@@ -48,7 +48,11 @@ type GenerateParams struct {
 	PresencePenalty  *float64 `json:"presencePenalty,omitempty"`
 	Seed             *int     `json:"seed,omitempty"`
 	ReasoningEffort  *string  `json:"reasoningEffort,omitempty"`
-	PromptCacheKey   *string  `json:"promptCacheKey,omitempty"`
+	// ReasoningSummary explicitly requests a provider-supported, human-readable
+	// reasoning summary. Values are provider-defined; OpenAI Responses supports
+	// "auto", "concise", and "detailed".
+	ReasoningSummary *string `json:"reasoningSummary,omitempty"`
+	PromptCacheKey   *string `json:"promptCacheKey,omitempty"`
 }
 
 // StepResult represents the outcome of a single step (one LLM call + tool execution round).

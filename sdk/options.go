@@ -83,6 +83,13 @@ func WithReasoningEffort(effort string) GenerateOption {
 	return func(c *generateConfig) { c.Params.ReasoningEffort = &effort }
 }
 
+// WithReasoningSummary explicitly requests a provider-supported,
+// human-readable reasoning summary. OpenAI Responses supports "auto",
+// "concise", and "detailed".
+func WithReasoningSummary(summary string) GenerateOption {
+	return func(c *generateConfig) { c.Params.ReasoningSummary = &summary }
+}
+
 func WithPromptCacheKey(key string) GenerateOption {
 	return func(c *generateConfig) { c.Params.PromptCacheKey = &key }
 }

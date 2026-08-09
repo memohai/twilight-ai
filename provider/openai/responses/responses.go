@@ -240,8 +240,15 @@ func (p *Provider) buildRequest(params *sdk.GenerateParams) (*responsesRequest, 
 		}
 	}
 
-	if params.ReasoningEffort != nil {
-		req.Reasoning = &responsesReasoning{Effort: *params.ReasoningEffort}
+	if (params.ReasoningEffort != nil && *params.ReasoningEffort != "") ||
+		(params.ReasoningSummary != nil && *params.ReasoningSummary != "") {
+		req.Reasoning = &responsesReasoning{}
+		if params.ReasoningEffort != nil {
+			req.Reasoning.Effort = *params.ReasoningEffort
+		}
+		if params.ReasoningSummary != nil {
+			req.Reasoning.Summary = *params.ReasoningSummary
+		}
 	}
 
 	return req, nil

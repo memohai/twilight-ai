@@ -299,13 +299,17 @@ result, _ := sdk.GenerateTextResult(ctx,
     sdk.WithMessages([]sdk.Message{
         sdk.UserMessage("What is 15 * 37? Think step by step."),
     }),
-    sdk.WithReasoningEffort(&effort),
+    sdk.WithReasoningEffort(effort),
+    sdk.WithReasoningSummary("auto"),
 )
 fmt.Println(result.Reasoning)  // model's reasoning summary
 fmt.Println(result.Text)       // final answer: "555"
 ```
 
-In streaming mode, reasoning arrives as `ReasoningStartPart` / `ReasoningDeltaPart` / `ReasoningEndPart` before the text content.
+`WithReasoningSummary` is an explicit opt-in. OpenAI Responses supports `"auto"`,
+`"concise"`, and `"detailed"`; compatible endpoints may support a different
+subset. In streaming mode, summaries arrive as `ReasoningStartPart` /
+`ReasoningDeltaPart` / `ReasoningEndPart` before the text content.
 
 ### Supported Features
 

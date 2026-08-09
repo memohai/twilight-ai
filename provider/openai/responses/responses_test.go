@@ -200,7 +200,8 @@ func TestResponsesDoGenerate_PromptCacheKeyOmittedWhenUnset(t *testing.T) {
 func TestResponsesDoGenerate_ForwardsMaxReasoningEffortVerbatim(t *testing.T) {
 	var body struct {
 		Reasoning *struct {
-			Effort string `json:"effort"`
+			Effort  string  `json:"effort"`
+			Summary *string `json:"summary"`
 		} `json:"reasoning"`
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -238,6 +239,57 @@ func TestResponsesDoGenerate_ForwardsMaxReasoningEffortVerbatim(t *testing.T) {
 	}
 	if body.Reasoning == nil || body.Reasoning.Effort != "max" {
 		t.Fatalf("reasoning.effort: got %#v, want max (forwarded verbatim)", body.Reasoning)
+	}
+	if body.Reasoning.Summary != nil {
+		t.Fatalf("reasoning.summary should be omitted unless explicitly requested, got %q", *body.Reasoning.Summary)
+	}
+}
+
+func TestResponsesDoGenerate_ReasoningSummaryIsExplicitAndIndependent(t *testing.T) {
+	var body struct {
+		Reasoning *struct {
+			Effort  *string `json:"effort"`
+			Summary *string `json:"summary"`
+		} `json:"reasoning"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id":         "resp_summary",
+			"created_at": 1700000000,
+			"model":      "gpt-5.2",
+			"output": []map[string]any{{
+				"type": "message",
+				"id":   "msg_001",
+				"role": "assistant",
+				"content": []map[string]any{{
+					"type": "output_text",
+					"text": "ok",
+				}},
+			}},
+			"usage": map[string]any{"input_tokens": 1, "output_tokens": 1},
+		})
+	}))
+	defer srv.Close()
+
+	p := responses.New(responses.WithAPIKey("test-key"), responses.WithBaseURL(srv.URL))
+	summary := "auto"
+	_, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model:            p.ChatModel("gpt-5.2"),
+		Messages:         []sdk.Message{sdk.UserMessage("hi")},
+		ReasoningSummary: &summary,
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate: %v", err)
+	}
+	if body.Reasoning == nil || body.Reasoning.Summary == nil || *body.Reasoning.Summary != "auto" {
+		t.Fatalf("reasoning.summary: got %#v, want auto", body.Reasoning)
+	}
+	if body.Reasoning.Effort != nil {
+		t.Fatalf("reasoning.effort should be omitted when unset, got %q", *body.Reasoning.Effort)
 	}
 }
 
@@ -1483,10 +1535,12 @@ func TestIntegration_ResponsesDoGenerate_Reasoning(t *testing.T) {
 	p := newResponsesIntegrationProvider(t)
 	model := p.ChatModel(openRouterResponsesReasoningModel)
 	effort := "low"
+	summary := "auto"
 	result, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
-		Model:           model,
-		Messages:        []sdk.Message{sdk.UserMessage("What is 15 * 37? Think step by step.")},
-		ReasoningEffort: &effort,
+		Model:            model,
+		Messages:         []sdk.Message{sdk.UserMessage("What is 15 * 37? Think step by step.")},
+		ReasoningEffort:  &effort,
+		ReasoningSummary: &summary,
 	})
 	if err != nil {
 		t.Fatalf("DoGenerate: %v", err)
@@ -1506,10 +1560,12 @@ func TestIntegration_ResponsesDoStream_Reasoning(t *testing.T) {
 	p := newResponsesIntegrationProvider(t)
 	model := p.ChatModel(openRouterResponsesReasoningModel)
 	effort := "low"
+	summary := "auto"
 	sr, err := p.DoStream(context.Background(), sdk.GenerateParams{
-		Model:           model,
-		Messages:        []sdk.Message{sdk.UserMessage("What is 15 * 37? Think step by step.")},
-		ReasoningEffort: &effort,
+		Model:            model,
+		Messages:         []sdk.Message{sdk.UserMessage("What is 15 * 37? Think step by step.")},
+		ReasoningEffort:  &effort,
+		ReasoningSummary: &summary,
 	})
 	if err != nil {
 		t.Fatalf("DoStream: %v", err)
