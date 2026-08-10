@@ -52,16 +52,33 @@ type functionResponseVal struct {
 }
 
 type generationConfig struct {
-	MaxOutputTokens  *int     `json:"maxOutputTokens,omitempty"`
-	Temperature      *float64 `json:"temperature,omitempty"`
-	TopP             *float64 `json:"topP,omitempty"`
-	TopK             *float64 `json:"topK,omitempty"`
-	FrequencyPenalty *float64 `json:"frequencyPenalty,omitempty"`
-	PresencePenalty  *float64 `json:"presencePenalty,omitempty"`
-	StopSequences    []string `json:"stopSequences,omitempty"`
-	Seed             *int     `json:"seed,omitempty"`
-	ResponseMimeType string   `json:"responseMimeType,omitempty"`
-	ResponseSchema   any      `json:"responseSchema,omitempty"`
+	MaxOutputTokens  *int            `json:"maxOutputTokens,omitempty"`
+	Temperature      *float64        `json:"temperature,omitempty"`
+	TopP             *float64        `json:"topP,omitempty"`
+	TopK             *float64        `json:"topK,omitempty"`
+	FrequencyPenalty *float64        `json:"frequencyPenalty,omitempty"`
+	PresencePenalty  *float64        `json:"presencePenalty,omitempty"`
+	StopSequences    []string        `json:"stopSequences,omitempty"`
+	Seed             *int            `json:"seed,omitempty"`
+	ResponseMimeType string          `json:"responseMimeType,omitempty"`
+	ResponseSchema   any             `json:"responseSchema,omitempty"`
+	ThinkingConfig   *thinkingConfig `json:"thinkingConfig,omitempty"`
+}
+
+// thinkingConfig mirrors the upstream Google GenerativeAI API shape.
+// ThinkingBudget and ThinkingLevel are two parallel optional fields on the same
+// struct, exactly as the official google-genai SDK models them. No mutual-exclusion
+// check is performed here; misuse surfaces as a 400 from the API.
+type thinkingConfig struct {
+	// ThinkingBudget is the token budget for thinking on 2.5-generation models.
+	// Use ThinkingBudgetDynamic (-1) for automatic and ThinkingBudgetDisabled (0)
+	// to disable (legal on Flash/Lite; rejected by 2.5 Pro).
+	ThinkingBudget *int `json:"thinkingBudget,omitempty"`
+	// ThinkingLevel is the effort tier for 3.x-generation models.
+	// Values: "minimal", "low", "medium", "high".
+	ThinkingLevel string `json:"thinkingLevel,omitempty"`
+	// IncludeThoughts controls whether thought content is returned in the response.
+	IncludeThoughts *bool `json:"includeThoughts,omitempty"`
 }
 
 type toolGroup struct {

@@ -16,10 +16,39 @@ import (
 
 const defaultBaseURL = "https://generativelanguage.googleapis.com/v1beta"
 
+// ThinkingBudgetDynamic instructs the model to choose its own thinking budget
+// (thinkingBudget: -1, AUTOMATIC). Supported on 2.5-generation models.
+const ThinkingBudgetDynamic = -1
+
+// ThinkingBudgetDisabled disables thinking (thinkingBudget: 0, DISABLED).
+// Legal on Flash/Lite models; the API rejects it for 2.5 Pro.
+const ThinkingBudgetDisabled = 0
+
+// ThinkingConfig holds provider-level thinking parameters for Google Generative
+// AI models. The caller is responsible for choosing the right fields for the
+// target model generation:
+//   - ThinkingBudget is used by 2.5-generation models (e.g. gemini-2.5-flash).
+//   - ThinkingLevel is used by 3.x-generation models (e.g. gemini-3.1-pro-preview).
+//
+// Both fields are passed through as-is; the SDK does not validate mutual
+// exclusivity or budget ranges — misuse results in a 400 from the API.
+type ThinkingConfig struct {
+	// ThinkingBudget sets the token budget for 2.5-generation models.
+	// Use ThinkingBudgetDynamic (-1) for automatic, ThinkingBudgetDisabled (0) to
+	// disable (only valid on Flash/Lite). Nil means this field is not sent.
+	ThinkingBudget *int
+	// ThinkingLevel sets the effort tier for 3.x-generation models.
+	// Accepted values: "minimal", "low", "medium", "high". Empty means not sent.
+	ThinkingLevel string
+	// IncludeThoughts controls whether thought content is returned. Nil means not sent.
+	IncludeThoughts *bool
+}
+
 type Provider struct {
 	apiKey     string
 	baseURL    string
 	httpClient *http.Client
+	thinking   *ThinkingConfig
 }
 
 type Option func(*Provider)
@@ -39,6 +68,16 @@ func WithBaseURL(baseURL string) Option {
 func WithHTTPClient(client *http.Client) Option {
 	return func(p *Provider) {
 		p.httpClient = client
+	}
+}
+
+// WithThinking injects provider-level thinking configuration. When set, it
+// takes precedence over the generic params.ReasoningEffort from a Generate
+// call — the more expressive provider option wins. See ThinkingConfig for
+// field semantics and generation-specific guidance.
+func WithThinking(cfg ThinkingConfig) Option {
+	return func(p *Provider) {
+		p.thinking = &cfg
 	}
 }
 
@@ -217,6 +256,32 @@ func (p *Provider) buildRequest(params *sdk.GenerateParams) (*generateRequest, e
 			}
 		}
 	}
+
+	// Thinking configuration: provider-level WithThinking takes precedence over
+	// the generic params.ReasoningEffort. When both are present the provider
+	// option wins — it is more expressive and its intent is unambiguous. When
+	// only ReasoningEffort is set it is treated as a thinkingLevel string, which
+	// is structurally equivalent (both are named effort tiers). When neither is
+	// set thinkingConfig is omitted entirely (omitempty on generationConfig).
+	//
+	// No mutual-exclusion check and no budget-range validation are performed;
+	// both would require the SDK to encode knowledge about which model
+	// generation accepts which fields — that is the caller's responsibility.
+	// Illegal combinations surface as 400 errors from the API.
+	switch {
+	case p.thinking != nil:
+		tc := &thinkingConfig{
+			ThinkingBudget:  p.thinking.ThinkingBudget,
+			ThinkingLevel:   p.thinking.ThinkingLevel,
+			IncludeThoughts: p.thinking.IncludeThoughts,
+		}
+		genCfg.ThinkingConfig = tc
+	case params.ReasoningEffort != nil:
+		if effort := strings.TrimSpace(*params.ReasoningEffort); effort != "" {
+			genCfg.ThinkingConfig = &thinkingConfig{ThinkingLevel: effort}
+		}
+	}
+
 	req.GenerationConfig = genCfg
 
 	if len(params.Tools) > 0 {
