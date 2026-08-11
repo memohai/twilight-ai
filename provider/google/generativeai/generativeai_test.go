@@ -1068,6 +1068,8 @@ func TestDoGenerate_ThinkingConfig(t *testing.T) {
 	includeTrue := true
 	effortHigh := "high"
 	effortMedium := "medium"
+	effortXHigh := "xhigh"
+	effortBlank := "   "
 
 	tests := []struct {
 		name            string
@@ -1108,7 +1110,7 @@ func TestDoGenerate_ThinkingConfig(t *testing.T) {
 			providerOpts: []generativeai.Option{
 				generativeai.WithThinking(generativeai.ThinkingConfig{ThinkingLevel: "high"}),
 			},
-			wantLevel: "high",
+			wantLevel: "HIGH",
 		},
 		{
 			name: "WithThinking with IncludeThoughts",
@@ -1118,18 +1120,18 @@ func TestDoGenerate_ThinkingConfig(t *testing.T) {
 					IncludeThoughts: &includeTrue,
 				}),
 			},
-			wantLevel:           "medium",
+			wantLevel:           "MEDIUM",
 			wantIncludeThoughts: &includeTrue,
 		},
 		{
-			name:            "only ReasoningEffort maps to thinkingLevel",
+			name:            "only ReasoningEffort maps to uppercase thinkingLevel",
 			reasoningEffort: &effortHigh,
-			wantLevel:       "high",
+			wantLevel:       "HIGH",
 		},
 		{
-			name:            "ReasoningEffort medium maps to thinkingLevel medium",
+			name:            "ReasoningEffort medium maps to thinkingLevel MEDIUM",
 			reasoningEffort: &effortMedium,
-			wantLevel:       "medium",
+			wantLevel:       "MEDIUM",
 		},
 		{
 			name: "WithThinking overrides ReasoningEffort (provider option wins)",
@@ -1143,6 +1145,43 @@ func TestDoGenerate_ThinkingConfig(t *testing.T) {
 		{
 			name:       "no thinking config when neither set",
 			wantAbsent: true,
+		},
+		{
+			// An empty WithThinking carries no intent, so it must not suppress
+			// the request-level effort or emit a bare thinkingConfig: {}.
+			name: "empty WithThinking falls through to ReasoningEffort",
+			providerOpts: []generativeai.Option{
+				generativeai.WithThinking(generativeai.ThinkingConfig{}),
+			},
+			reasoningEffort: &effortHigh,
+			wantLevel:       "HIGH",
+		},
+		{
+			name: "empty WithThinking with no effort omits thinkingConfig",
+			providerOpts: []generativeai.Option{
+				generativeai.WithThinking(generativeai.ThinkingConfig{}),
+			},
+			wantAbsent: true,
+		},
+		{
+			// Already-uppercase input must survive unchanged.
+			name: "WithThinking uppercase level passes through",
+			providerOpts: []generativeai.Option{
+				generativeai.WithThinking(generativeai.ThinkingConfig{ThinkingLevel: "LOW"}),
+			},
+			wantLevel: "LOW",
+		},
+		{
+			// Tiers outside Google's enum are upper-cased and sent as-is rather
+			// than being remapped to a supported neighbour; the API returns 400.
+			name:            "unsupported tier is passed through uppercased",
+			reasoningEffort: &effortXHigh,
+			wantLevel:       "XHIGH",
+		},
+		{
+			name:            "whitespace-only effort omits thinkingConfig",
+			reasoningEffort: &effortBlank,
+			wantAbsent:      true,
 		},
 	}
 

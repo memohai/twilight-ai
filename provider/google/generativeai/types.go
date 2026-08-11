@@ -69,13 +69,20 @@ type generationConfig struct {
 // ThinkingBudget and ThinkingLevel are two parallel optional fields on the same
 // struct, exactly as the official google-genai SDK models them. No mutual-exclusion
 // check is performed here; misuse surfaces as a 400 from the API.
+//
+// Two deliberate divergences from google-genai: IncludeThoughts is a *bool
+// rather than a bool so an explicit false is distinguishable from unset, and
+// ThinkingBudget is a *int rather than a *int32 to match Go conventions in this
+// SDK. Neither changes the wire format.
 type thinkingConfig struct {
 	// ThinkingBudget is the token budget for thinking on 2.5-generation models.
 	// Use ThinkingBudgetDynamic (-1) for automatic and ThinkingBudgetDisabled (0)
 	// to disable (legal on Flash/Lite; rejected by 2.5 Pro).
 	ThinkingBudget *int `json:"thinkingBudget,omitempty"`
-	// ThinkingLevel is the effort tier for 3.x-generation models.
-	// Values: "minimal", "low", "medium", "high".
+	// ThinkingLevel is the effort tier for 3.x-generation models. This is a proto
+	// enum on the wire and only accepts uppercase members: "MINIMAL", "LOW",
+	// "MEDIUM", "HIGH". Callers pass tiers in any case; buildRequest upper-cases
+	// them before they reach this struct.
 	ThinkingLevel string `json:"thinkingLevel,omitempty"`
 	// IncludeThoughts controls whether thought content is returned in the response.
 	IncludeThoughts *bool `json:"includeThoughts,omitempty"`

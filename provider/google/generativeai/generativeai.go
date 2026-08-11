@@ -37,11 +37,32 @@ type ThinkingConfig struct {
 	// Use ThinkingBudgetDynamic (-1) for automatic, ThinkingBudgetDisabled (0) to
 	// disable (only valid on Flash/Lite). Nil means this field is not sent.
 	ThinkingBudget *int
-	// ThinkingLevel sets the effort tier for 3.x-generation models.
-	// Accepted values: "minimal", "low", "medium", "high". Empty means not sent.
+	// ThinkingLevel sets the effort tier for 3.x-generation models. The wire
+	// format is an uppercase proto enum: "MINIMAL", "LOW", "MEDIUM", "HIGH".
+	// Values are upper-cased before being sent, so "high" and "HIGH" are
+	// equivalent here. Empty means not sent.
 	ThinkingLevel string
-	// IncludeThoughts controls whether thought content is returned. Nil means not sent.
+	// IncludeThoughts controls whether thought content is returned. Nil means not
+	// sent. Note that the API only emits thought parts when this is true, so
+	// reasoning stream parts stay empty unless it is explicitly enabled.
 	IncludeThoughts *bool
+}
+
+// isEmpty reports whether the config carries no fields at all. An empty config
+// is treated as "not configured" so it falls through to params.ReasoningEffort
+// rather than sending a bare `thinkingConfig: {}` and swallowing the request's
+// effort.
+func (c *ThinkingConfig) isEmpty() bool {
+	return c.ThinkingBudget == nil && c.ThinkingLevel == "" && c.IncludeThoughts == nil
+}
+
+// normalizeThinkingLevel converts an effort tier to the uppercase form the
+// thinkingLevel proto enum requires, trimming surrounding space. It is a
+// dialect translation and deliberately not a validation: a tier Google does not
+// define (e.g. "xhigh") is upper-cased and sent, surfacing as a 400 from the
+// API rather than being silently downgraded to a supported neighbour.
+func normalizeThinkingLevel(level string) string {
+	return strings.ToUpper(strings.TrimSpace(level))
 }
 
 type Provider struct {
@@ -259,26 +280,34 @@ func (p *Provider) buildRequest(params *sdk.GenerateParams) (*generateRequest, e
 
 	// Thinking configuration: provider-level WithThinking takes precedence over
 	// the generic params.ReasoningEffort. When both are present the provider
-	// option wins — it is more expressive and its intent is unambiguous. When
-	// only ReasoningEffort is set it is treated as a thinkingLevel string, which
-	// is structurally equivalent (both are named effort tiers). When neither is
-	// set thinkingConfig is omitted entirely (omitempty on generationConfig).
+	// option wins — it is more expressive and its intent is unambiguous. An
+	// empty WithThinking carries no intent, so it falls through to
+	// ReasoningEffort instead of suppressing it. When only ReasoningEffort is
+	// set it is treated as a thinkingLevel tier, which is structurally
+	// equivalent (both are named effort tiers). When neither is set
+	// thinkingConfig is omitted entirely (omitempty on generationConfig).
+	//
+	// thinkingLevel is a proto enum and only accepts uppercase members
+	// ("MINIMAL", "LOW", "MEDIUM", "HIGH"), while effort tiers elsewhere in this
+	// SDK are lowercase. Upper-casing here is dialect translation, not
+	// validation: tiers outside Google's enum (e.g. "xhigh") are still passed
+	// through and surface as a 400 rather than being silently remapped.
 	//
 	// No mutual-exclusion check and no budget-range validation are performed;
 	// both would require the SDK to encode knowledge about which model
 	// generation accepts which fields — that is the caller's responsibility.
 	// Illegal combinations surface as 400 errors from the API.
 	switch {
-	case p.thinking != nil:
+	case p.thinking != nil && !p.thinking.isEmpty():
 		tc := &thinkingConfig{
 			ThinkingBudget:  p.thinking.ThinkingBudget,
-			ThinkingLevel:   p.thinking.ThinkingLevel,
+			ThinkingLevel:   normalizeThinkingLevel(p.thinking.ThinkingLevel),
 			IncludeThoughts: p.thinking.IncludeThoughts,
 		}
 		genCfg.ThinkingConfig = tc
 	case params.ReasoningEffort != nil:
-		if effort := strings.TrimSpace(*params.ReasoningEffort); effort != "" {
-			genCfg.ThinkingConfig = &thinkingConfig{ThinkingLevel: effort}
+		if level := normalizeThinkingLevel(*params.ReasoningEffort); level != "" {
+			genCfg.ThinkingConfig = &thinkingConfig{ThinkingLevel: level}
 		}
 	}
 
