@@ -1257,6 +1257,8 @@ func TestResponsesInputConversion_AssistantReasoning(t *testing.T) {
 
 // ---------- integration tests ----------
 
+const openRouterResponsesReasoningModel = "openai/gpt-5.4-mini"
+
 func envOrSkip(t *testing.T, key string) string {
 	t.Helper()
 	v := os.Getenv(key)
@@ -1479,7 +1481,7 @@ func TestIntegration_ResponsesDoStream(t *testing.T) {
 
 func TestIntegration_ResponsesDoGenerate_Reasoning(t *testing.T) {
 	p := newResponsesIntegrationProvider(t)
-	model := p.ChatModel("openai/o4-mini")
+	model := p.ChatModel(openRouterResponsesReasoningModel)
 	effort := "low"
 	result, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
 		Model:           model,
@@ -1502,7 +1504,7 @@ func TestIntegration_ResponsesDoGenerate_Reasoning(t *testing.T) {
 
 func TestIntegration_ResponsesDoStream_Reasoning(t *testing.T) {
 	p := newResponsesIntegrationProvider(t)
-	model := p.ChatModel("openai/o4-mini")
+	model := p.ChatModel(openRouterResponsesReasoningModel)
 	effort := "low"
 	sr, err := p.DoStream(context.Background(), sdk.GenerateParams{
 		Model:           model,

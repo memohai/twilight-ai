@@ -1314,6 +1314,8 @@ func TestIntegration_DoStream(t *testing.T) {
 
 // ---------- multi-model integration tests (OpenRouter) ----------
 
+const openRouterGoogleIntegrationModel = "google/gemini-3.6-flash"
+
 func TestIntegration_MultiModel(t *testing.T) {
 	p := newIntegrationProvider(t)
 
@@ -1321,7 +1323,7 @@ func TestIntegration_MultiModel(t *testing.T) {
 		id           string
 		hasReasoning bool
 	}{
-		{"google/gemini-2.5-flash", false},
+		{openRouterGoogleIntegrationModel, false},
 		{"deepseek/deepseek-r1", true},
 		{"deepseek/deepseek-chat", false},
 	}
@@ -1357,7 +1359,7 @@ func TestIntegration_MultiModel_Stream(t *testing.T) {
 		id           string
 		hasReasoning bool
 	}{
-		{"google/gemini-2.5-flash", false},
+		{openRouterGoogleIntegrationModel, false},
 		{"deepseek/deepseek-r1", true},
 	}
 
