@@ -18,17 +18,17 @@ type stepOutcome struct {
 	rawFinishReason string
 }
 
-// pausePending records the makings of a pause the moment a deferral is
-// known — before the commit barrier runs. Approval requests are announced
-// and sibling side effects have happened by then, so the pause must survive
-// even a barrier failure.
-type pausePending struct {
+// pauseSnapshot captures a complete pause before the commit barrier runs.
+// Approval requests are announced and sibling side effects may have happened
+// by then, so the snapshot must survive even a barrier failure.
+type pauseSnapshot struct {
 	deferred []DeferredToolApproval
 	batchID  string
-	// messages holds the paused step's messages when the step failed to
-	// commit (empty when the step committed normally — the step record has
-	// them then).
+	// messages is the effective conversation sent to the provider for the
+	// paused step, followed by that step's assistant/tool messages. Keeping the
+	// complete snapshot matters when PrepareStep replaced or compacted history.
 	messages []Message
+	system   string
 }
 
 // toolLoopState accumulates what a multi-step run produces. When runToolLoop
@@ -41,44 +41,44 @@ type toolLoopState struct {
 	totalUsage      Usage
 	finishReason    FinishReason
 	rawFinishReason string
-	// input is the conversation the run started from, snapshotted before the
-	// first step. PrepareStep and OnStep overrides mutate cfg.Params during
-	// the loop, so the pause must be built from this snapshot — never from
-	// cfg.Params.Messages after the loop has run.
-	input []Message
-	// system is the run's root instruction, snapshotted alongside input so a
-	// pause carries everything needed to resume in another process.
-	system string
 	// pendingPause is set the moment a step defers, before the commit
 	// barrier — the pause's source of truth whether or not the step commits.
-	pendingPause *pausePending
+	pendingPause *pauseSnapshot
 }
 
-// pause returns the portable resume state when the run stopped on deferred
+// pause returns the portable paused state when the run stopped on deferred
 // approvals, or nil if it finished normally. It is available even when the
 // paused step's commit barrier failed: by that point the approval requests
-// were announced and sibling side effects had happened, so the pause is the
+// were announced and sibling side effects may have happened, so the pause is the
 // host's only handle for reconciliation.
 func (st *toolLoopState) pause() *ToolApprovalPause {
 	if st.pendingPause == nil {
 		return nil
 	}
-	msgs := make([]Message, 0, len(st.input)+len(st.messages)+len(st.pendingPause.messages))
-	msgs = append(msgs, st.input...)
-	msgs = append(msgs, st.messages...)
-	// When the paused step failed its commit barrier, its messages are not in
-	// st.messages; the pendingPause carries them so the conversation is
-	// complete either way.
-	msgs = append(msgs, st.pendingPause.messages...)
+	msgs := clonePauseMessages(st.pendingPause.messages)
 	// Copy Pending so mutations by the host cannot rewrite the step record
 	// (the StepResult holds the same backing array otherwise).
-	pending := make([]DeferredToolApproval, len(st.pendingPause.deferred))
-	copy(pending, st.pendingPause.deferred)
+	pending := cloneDeferredToolApprovals(st.pendingPause.deferred)
 	return &ToolApprovalPause{
 		BatchID:  st.pendingPause.batchID,
-		System:   st.system,
+		System:   st.pendingPause.system,
 		Messages: msgs,
 		Pending:  pending,
+	}
+}
+
+// recordPause snapshots the exact context used for the paused provider call
+// and appends that call's output. It runs before the commit barrier so the
+// host can still reconcile a pause when committing the step fails.
+func (st *toolLoopState) recordPause(system string, inputMessages, stepMessages []Message, deferred []DeferredToolApproval, batchID string) {
+	messages := make([]Message, 0, len(inputMessages)+len(stepMessages))
+	messages = append(messages, inputMessages...)
+	messages = append(messages, stepMessages...)
+	st.pendingPause = &pauseSnapshot{
+		deferred: cloneDeferredToolApprovals(deferred),
+		batchID:  batchID,
+		messages: clonePauseMessages(messages),
+		system:   system,
 	}
 }
 
@@ -114,17 +114,9 @@ func runToolLoop(
 	}
 
 	toolMap := buildToolMap(cfg.Params.Tools)
-	// Snapshot the pristine input and system prompt before the first step:
-	// PrepareStep/OnStep overrides mutate cfg.Params mid-loop, and the pause
-	// must be reconstructable from what the run actually started with.
-	st.input = make([]Message, len(cfg.Params.Messages))
-	copy(st.input, cfg.Params.Messages)
-	st.system = cfg.Params.System
-	// The working conversation starts as an alias of the snapshot; the alias
-	// is safe because len==cap, so the first append reallocates, and
-	// PrepareStep (the only in-place mutator) runs no earlier than the
-	// iteration after that append.
-	messages := st.input
+	// Keep the loop's working slice independent from the caller's slice. A
+	// pause takes a fresh snapshot again at the exact step where it occurs.
+	messages := append([]Message(nil), cfg.Params.Messages...)
 
 	for iter := 0; shouldContinueLoop(maxSteps, iter); iter++ {
 		// Prepare before every model call that follows a committed step.
@@ -134,6 +126,15 @@ func runToolLoop(
 
 		params := cfg.Params
 		params.Messages = messages
+
+		// When this run can pause, freeze the exact conversation at the provider
+		// boundary. The provider may retain or transform its request while
+		// producing a result; a later pause must still reflect what was submitted.
+		var pauseInput []Message
+		canPause := (cfg.ApprovalHandler != nil || cfg.ApprovalBatchHandler != nil) && hasConfiguredApprovalGatedTool(toolMap)
+		if canPause {
+			pauseInput = clonePauseMessages(params.Messages)
+		}
 
 		out, err := doStep(len(st.steps), params)
 		if err != nil {
@@ -145,10 +146,20 @@ func runToolLoop(
 
 		// No executable tool calls (or execution disabled) → final step.
 		if !autoExecuteTools || out.finishReason != FinishReasonToolCalls || len(out.toolCalls) == 0 || !hasExecutableTools(out.toolCalls, toolMap) {
-			if _, err := st.commitStep(ctx, cfg, &out, nil, nil); err != nil {
+			stepMsgs := buildStepMessages(out.text, out.reasoning, out.reasoningMeta, out.toolCalls, nil, &out.usage)
+			if err := st.commitStep(ctx, cfg, &out, stepMsgs, nil, nil); err != nil {
 				return st, err
 			}
 			break
+		}
+
+		// Preserve the effective provider request and output only when this step
+		// can actually defer. These snapshots are not passed to approval callbacks
+		// or tools, so their established input ownership semantics remain unchanged.
+		var pauseOut *stepOutcome
+		if canPause && hasApprovalGatedTools(out.toolCalls, toolMap) {
+			cloned := cloneStepOutcome(out)
+			pauseOut = &cloned
 		}
 
 		toolResults, deferred, batchID, err := executeTools(ctx, out.toolCalls, toolMap,
@@ -163,20 +174,19 @@ func runToolLoop(
 		// tool-calls finish. The step itself keeps the provider's finish
 		// reason — it describes the model call, not the run.
 		//
-		// Record the pause makings BEFORE the commit barrier: by this point
-		// approval requests are announced and sibling side effects have
+		stepMsgs := buildStepMessages(out.text, out.reasoning, out.reasoningMeta, out.toolCalls, toolResults, &out.usage)
+		// Record the complete pause BEFORE the commit barrier: by this point
+		// approval requests are announced and sibling side effects may have
 		// happened, so even a barrier failure must not lose the pause — it is
 		// the only handle the host has to reconcile what already occurred.
 		if len(deferred) > 0 {
-			st.pendingPause = &pausePending{deferred: deferred, batchID: batchID}
+			// A deferred decision can only come from an approval-gated tool with a
+			// configured handler, so pauseOut must have been captured above.
+			pauseStepMsgs := buildStepMessages(pauseOut.text, pauseOut.reasoning, pauseOut.reasoningMeta, pauseOut.toolCalls, toolResults, &pauseOut.usage)
+			pausePending := deferredWithOriginalCalls(deferred, pauseOut.toolCalls)
+			st.recordPause(params.System, pauseInput, pauseStepMsgs, pausePending, batchID)
 		}
-		stepMsgs, err := st.commitStep(ctx, cfg, &out, toolResults, deferred)
-		if err != nil {
-			// The step did not commit, but the pause survives via
-			// pendingPause + the step's messages captured here.
-			if st.pendingPause != nil {
-				st.pendingPause.messages = buildStepMessages(out.text, out.reasoning, out.reasoningMeta, out.toolCalls, toolResults, &out.usage)
-			}
+		if err := st.commitStep(ctx, cfg, &out, stepMsgs, toolResults, deferred); err != nil {
 			return st, err
 		}
 		if len(deferred) > 0 {
@@ -197,10 +207,10 @@ func (st *toolLoopState) commitStep(
 	ctx context.Context,
 	cfg *generateConfig,
 	out *stepOutcome,
+	stepMsgs []Message,
 	toolResults []ToolResultPart,
 	deferred []DeferredToolApproval,
-) ([]Message, error) {
-	stepMsgs := buildStepMessages(out.text, out.reasoning, out.reasoningMeta, out.toolCalls, toolResults, &out.usage)
+) error {
 	sr := StepResult{
 		Text:                  out.text,
 		Reasoning:             out.reasoning,
@@ -215,11 +225,15 @@ func (st *toolLoopState) commitStep(
 	if len(toolResults) > 0 {
 		sr.ToolResults = toolCallResultsFromParts(toolResults)
 	}
+	// Preserve the callback's established mutation semantics: annotations made
+	// by the commit barrier are recorded in Steps and observed by OnStep. A
+	// pending pause was snapshotted before this point, so those mutations cannot
+	// corrupt its stored conversation.
 	if err := applyOnStepCommitted(ctx, cfg, len(st.steps), &sr); err != nil {
-		return nil, err
+		return err
 	}
 	st.steps = append(st.steps, sr)
 	st.messages = append(st.messages, stepMsgs...)
 	applyOnStep(cfg, &sr)
-	return stepMsgs, nil
+	return nil
 }

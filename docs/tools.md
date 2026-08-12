@@ -277,7 +277,7 @@ result, err := sdk.GenerateTextResult(ctx,
     sdk.WithMessages(msgs),
     sdk.WithTools([]sdk.Tool{dangerousTool}),
     sdk.WithMaxSteps(5),
-    sdk.WithApprovalHandler(func(ctx context.Context, call sdk.ToolCall) (bool, error) {
+    sdk.WithApprovalHandlerBool(func(ctx context.Context, call sdk.ToolCall) (bool, error) {
         fmt.Printf("Allow %s with input %v? [y/n] ", call.ToolName, call.Input)
         var answer string
         fmt.Scanln(&answer)
@@ -292,7 +292,7 @@ When a tool call is denied, a `ToolOutputDeniedPart` is sent in streaming mode, 
 
 When the decision cannot be made synchronously (for example, it needs user input in a UI), use the full `WithApprovalHandler` form and return `ToolApprovalDecisionDeferred`. The run pauses at that step instead of executing the deferred calls.
 
-Every call in the step still gets its approval check: calls that need no approval or were approved execute as usual and their results are recorded, while all deferred calls are surfaced together. The approval phase itself is side-effect-free — every handler is consulted before anything executes, so a handler error fails the batch cleanly without orphaning already-announced approvals.
+Every approval-gated, executable call in the step is consulted before the SDK emits its approval or tool-execution events or starts executing tools. Provider stream parts from the model call may already have been forwarded before this phase. Approval handlers are host code and may have side effects of their own: if a per-call handler persists one request and a later callback fails, the SDK cannot roll back the earlier write. Use the batch handler below with a transaction when a step's pending approvals must be persisted atomically. Calls that need no approval or were approved then execute as usual and their results are recorded, while all deferred calls are surfaced together.
 
 ```go
 result, err := sdk.GenerateTextResult(ctx,
@@ -310,7 +310,7 @@ result, err := sdk.GenerateTextResult(ctx,
 )
 
 if result.FinishReason == sdk.FinishReasonPaused {
-    pause := result.Pause // portable resume state: full conversation + pending calls
+    pause := result.Pause // effective paused context + pending calls
     for _, d := range pause.Pending {
         // d.ToolCall is the pending call; d.Approval.ApprovalID identifies the decision.
     }
@@ -319,7 +319,7 @@ if result.FinishReason == sdk.FinishReasonPaused {
 
 #### Batch approval handler
 
-When the host persists pending approvals (a database of approval requests a UI later answers), the per-call handler cannot wrap a step's approvals in one transaction — it never sees the batch boundary. `WithApprovalBatchHandler` answers all of a step's approval-gated calls in a single invocation:
+When the host persists pending approvals (a database of approval requests a UI later answers), the per-call handler cannot wrap a step's approvals in one transaction — it never sees the batch boundary. `WithApprovalBatchHandler` answers all of a step's approval-gated, executable calls in a single invocation:
 
 ```go
 sdk.WithApprovalBatchHandler(func(ctx context.Context, batchID string, calls []sdk.ToolCall) ([]sdk.ToolApprovalBatchResult, error) {
@@ -344,15 +344,22 @@ sdk.WithApprovalBatchHandler(func(ctx context.Context, batchID string, calls []s
 }),
 ```
 
-Results are keyed by `ToolCallID` — assembly order does not matter — and the SDK verifies the response is complete: exactly one result per call, no unknown or duplicate IDs, and every `Decision` explicitly set (the zero value is an error here, never an implicit approval). The SDK generates `batchID` and repeats it as `Pause.BatchID`, giving reconciliation a stable correlation key on both sides: approval rows tagged with a batch ID whose pause was never persisted belong to a failed run and can be cancelled. It is a correlation ID, not an idempotency key — a retried step mints a new one; idempotency needs the host's own run identity plus the tool-call IDs. `Pause.BatchID` is empty under the per-call handler, which never sees a batch ID. Mutually exclusive with `WithApprovalHandler`; hosts without transactional needs keep the simpler per-call form.
+Before invoking the batch handler, the SDK verifies that every gated call has a non-empty `ToolCallID` and that every non-empty call ID in the model step is unique. This keeps malformed, unaddressable calls from reaching a handler that may commit a transaction. Results are also keyed by `ToolCallID` — assembly order does not matter — and the SDK verifies the response is complete: exactly one result per call, no unknown or duplicate IDs, and every `Decision` explicitly set (the zero value is an error here, never an implicit approval).
+
+The SDK generates `batchID`; if any result is deferred, the same value appears in `Pause.BatchID`. Use it to correlate only the deferred pending rows with the pause that owns them. A batch whose calls are all approved or rejected completes without a pause, so the absence of `Pause` alone does not prove that arbitrary records for that batch are orphaned. Reconciliation should combine the host's run outcome or pause-persistence acknowledgement with the deferred rows it created. `BatchID` is a correlation ID, not an idempotency key — a retried step mints a new one; idempotency needs the host's own run identity plus the tool-call IDs. `Pause.BatchID` is empty under the per-call handler, which never sees a batch ID. `WithApprovalBatchHandler` and `WithApprovalHandler` are mutually exclusive; hosts without transactional needs can keep the simpler per-call form.
 
 #### Pause survival on commit-barrier failure
 
-By the time a paused step reaches `OnStepCommitted`, approval requests are announced and the step's resolved sibling tools have executed. If the barrier then fails, the run errors — but the pause is NOT lost: the returned result still carries `Pause` (with `FinishReasonPaused`) alongside the error, and in streaming mode `StreamResult.Pause` is populated on the error path. Persist that pause to reconcile: it is the only record linking the announced approvals and completed side effects to a resumable state.
+By the time a paused step reaches `OnStepCommitted`, approval requests have been announced and resolved sibling tools may already have executed. The outcome depends on whether the commit barrier succeeds:
 
-A paused run reports `FinishReasonPaused` on the overall result (and on the stream's `FinishPart`), so it is always distinguishable from a normal `tool-calls` finish. `Result.Pause` is a `ToolApprovalPause` — plain data carrying the full conversation and the pending calls. Persist it (it round-trips through JSON) and hand it back once decisions arrive. Individual steps keep the provider's finish reason. In streaming mode, one `ToolApprovalRequestPart` is emitted per deferred call.
+- On a normal pause, the blocking result has `FinishReasonPaused` and `Pause`; streaming publishes `StreamResult.Pause` before sending `FinishPart` with `FinishReasonPaused`.
+- If `OnStepCommitted` fails, the blocking call returns a non-nil result carrying `FinishReasonPaused` and `Pause` alongside the error. Streaming publishes `StreamResult.Pause` and then sends `ErrorPart`; it does not send a paused `FinishPart` for the failed run.
 
-The paused step's `Messages` include the assistant message with all tool calls plus a tool message covering the already-resolved calls. Migration note for pre-0.5 integrations: the paused step used to record no tool results at all — code that appended a complete tool message covering every call on resume must now supply results only for the deferred calls, or providers will reject the duplicate results. (Persisted JSON from older versions used the singular `deferredToolApproval` key, which this version no longer reads.)
+Persist the surviving pause to reconcile announced approvals and any completed side effects with the stored paused state.
+
+A normally paused run reports `FinishReasonPaused` on the overall result (and on the stream's `FinishPart`), so it is distinguishable from a normal `tool-calls` finish. `Result.Pause` is a `ToolApprovalPause` — plain data carrying the exact system prompt and conversation used for the paused model call, that call's output, and the pending calls. It round-trips through JSON when the nested tool inputs, resolved results, provider metadata, and approval metadata are themselves JSON-compatible. Individual paused steps keep the provider's finish reason. In streaming mode, one `ToolApprovalRequestPart` is emitted per deferred call.
+
+The paused step's `Messages` include the assistant message with all tool calls plus a tool message covering only the already-resolved calls. `Pause.Pending` identifies the unresolved calls. Persisted JSON from older versions used the singular `deferredToolApproval` key, which this version no longer reads.
 
 ## Streaming with Tools
 
@@ -436,7 +443,8 @@ sdk.WithOnStep(func(step *sdk.StepResult) *sdk.GenerateParams {
 
 Use a synchronous durability barrier after a complete step is assembled and
 before the next model call begins. Returning an error stops generation and
-leaves that step out of the accumulated result:
+leaves that step out of the accumulated result. A deferred pause is snapshotted
+before this callback and is not rewritten by callback mutations:
 
 ```go
 sdk.WithOnStepCommitted(func(ctx context.Context, stepIndex int, step *sdk.StepResult) error {

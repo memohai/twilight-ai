@@ -236,7 +236,8 @@ type StreamResult struct {
 	// excluding the original input messages. Populated as the stream is consumed.
 	Messages []Message
 	// Pause is set when the run stopped on deferred tool approvals. It is the
-	// portable resume state; populated once the stream is fully consumed.
+	// portable paused state. On a normal pause it is visible before the paused
+	// FinishPart is sent; on all paths it is safe to read after Stream closes.
 	Pause *ToolApprovalPause
 }
 

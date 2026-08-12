@@ -24,6 +24,24 @@ func hasExecutableTools(toolCalls []ToolCall, toolMap map[string]*Tool) bool {
 	return false
 }
 
+func hasApprovalGatedTools(toolCalls []ToolCall, toolMap map[string]*Tool) bool {
+	for _, tc := range toolCalls {
+		if tool, ok := toolMap[tc.ToolName]; ok && tool.Execute != nil && tool.RequireApproval {
+			return true
+		}
+	}
+	return false
+}
+
+func hasConfiguredApprovalGatedTool(toolMap map[string]*Tool) bool {
+	for _, tool := range toolMap {
+		if tool.Execute != nil && tool.RequireApproval {
+			return true
+		}
+	}
+	return false
+}
+
 type pendingToolExec struct {
 	idx  int
 	tc   ToolCall
@@ -80,17 +98,16 @@ func newApprovalBatchID() string {
 // (awaiting a user decision), deferred lists them in tool-call order,
 // batchID identifies the approval batch (it reappears as
 // ToolApprovalPause.BatchID), and results holds only the calls already
-// resolved in the same batch (executed, rejected, or failed); callers
-// resuming the run must combine the two to form a protocol-complete tool
-// message. A non-nil error means the batch failed outright (approval handler
-// error, unknown decision) — never a deferral.
+// resolved in the same batch (executed, rejected, or failed). A non-nil error
+// means the batch failed outright (approval handler or validation error) —
+// never a deferral.
 //
-// The approval phase is free of side effects: every handler is consulted
-// before anything is emitted or executed, so a handler error cannot orphan
-// approval requests that were already announced to the stream, and no tool
-// runs in a batch that is about to fail. With a batch handler this extends
-// to the host: a transactional handler that rolled back leaves no trace on
-// either side.
+// The SDK consults every handler before emitting approval-decision or
+// tool-execution events, so a handler error leaves no trace from those phases
+// and no tool runs in a batch that is about to fail. Provider stream events
+// may already have been forwarded. Handlers are host callbacks and may have
+// side effects of their own; hosts that need atomic persistence across the
+// step must use a transactional batch handler.
 func executeTools(
 	ctx context.Context,
 	toolCalls []ToolCall,
@@ -129,6 +146,16 @@ func executeTools(
 		decisions[i] = d
 	}
 
+	// Batch responses are keyed by ToolCallID, and any deferred response must
+	// also produce an addressable pause. Reject malformed provider calls before
+	// invoking a transactional host callback: after it returns, its writes may
+	// already be committed.
+	if approvals.batchHandler != nil && len(gated) > 0 {
+		if err := validateApprovalBatchCallIDs(decisions, gated, duplicateIDs); err != nil {
+			return nil, nil, "", err
+		}
+	}
+
 	// Consult the host: one batch invocation covering every gated call, or
 	// the per-call handler in tool-call order. Both paths finish before any
 	// emission or execution.
@@ -140,18 +167,17 @@ func executeTools(
 	}
 
 	// A deferral in a batch with duplicate or missing tool-call IDs would
-	// produce a pause whose pending calls cannot be addressed by decisions —
-	// permanently unresumable. Fail here, before any emission or execution,
-	// rather than at resume time.
+	// produce a pause whose pending calls cannot be addressed by decisions.
+	// Fail here, before any emission or execution.
 	for i := range decisions {
 		if decisions[i].kind != toolDecisionDeferred {
 			continue
 		}
 		if id := decisions[i].tc.ToolCallID; id == "" {
-			return nil, nil, "", fmt.Errorf("twilightai: deferred tool call %q has no tool call ID; the pause would be unresumable", decisions[i].tc.ToolName)
+			return nil, nil, "", fmt.Errorf("twilightai: deferred tool call %q has no tool call ID; the pause would be unaddressable", decisions[i].tc.ToolName)
 		}
 		if duplicateIDs {
-			return nil, nil, "", fmt.Errorf("twilightai: tool call IDs are not unique in a batch with a deferred approval; the pause would be unresumable")
+			return nil, nil, "", fmt.Errorf("twilightai: tool call IDs are not unique in a batch with a deferred approval; the pause would be unaddressable")
 		}
 	}
 
@@ -227,10 +253,27 @@ func executeTools(
 	return results, nil, "", nil
 }
 
+// validateApprovalBatchCallIDs enforces the keyed batch request contract
+// before host code runs. A duplicate anywhere in the model step is rejected:
+// if the handler deferred a call, that duplicate would make the resulting
+// conversation and pause ambiguous even when only one occurrence was gated.
+func validateApprovalBatchCallIDs(decisions []toolDecision, gated []int, duplicateIDs bool) error {
+	for _, i := range gated {
+		if decisions[i].tc.ToolCallID == "" {
+			return fmt.Errorf("twilightai: approval-gated tool call %q has no tool call ID; batch approval calls must be addressable", decisions[i].tc.ToolName)
+		}
+	}
+	if duplicateIDs {
+		return fmt.Errorf("twilightai: tool call IDs are not unique in a step using batch approval; batch approval calls must be addressable")
+	}
+	return nil
+}
+
 // consultApprovals collects the host's decision for every gated call and
-// resolves each decision kind in place. It is the only side-effect-free spot
-// where the host is consulted; any error leaves decisions unusable and the
-// whole batch fails before emission or execution.
+// resolves each decision kind in place. Any error leaves decisions unusable,
+// and the whole batch fails before SDK approval/tool-execution events or tool
+// execution. Host-side effects from callbacks are outside the SDK's rollback
+// boundary.
 func consultApprovals(ctx context.Context, approvals approvalConfig, decisions []toolDecision, gated []int) (string, error) {
 	if approvals.batchHandler != nil {
 		batchID := newApprovalBatchID()
@@ -346,9 +389,7 @@ func rejectedToolResultText(approval ToolApprovalResult) string {
 	return "tool execution denied by user"
 }
 
-// rejectedToolResult is the tool result recorded for a rejected call — the
-// single definition of the denial envelope, shared by the in-run rejection
-// path and resume-time rejections.
+// rejectedToolResult builds the canonical result for a rejected tool call.
 func rejectedToolResult(tc ToolCall, approval ToolApprovalResult) ToolResultPart {
 	return ToolResultPart{
 		ToolCallID: tc.ToolCallID,

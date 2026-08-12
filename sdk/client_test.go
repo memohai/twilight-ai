@@ -1153,11 +1153,10 @@ func TestClient_StreamText_PausesOnDeferredApprovals(t *testing.T) {
 	}
 }
 
-// Regression: the approval phase must be side-effect-free until every
-// handler has answered. A handler error after a sibling deferral must not
-// leak approval-request parts, must not execute tools, and must not commit a
-// step — otherwise the already-announced approvals are orphaned in the
-// host's store while the SDK reports a plain failure.
+// A handler error after an earlier deferral must not produce SDK approval
+// events, execute tools, or commit a step. Per-call handlers can still leave
+// their own earlier writes behind; atomic host persistence requires the batch
+// handler and a transaction.
 func TestClient_StreamText_ApprovalHandlerErrorAfterDeferral(t *testing.T) {
 	mp := &mockProvider{handler: func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
 		return &sdk.GenerateResult{
@@ -1170,6 +1169,7 @@ func TestClient_StreamText_ApprovalHandlerErrorAfterDeferral(t *testing.T) {
 	}}
 
 	executed := false
+	hostWrites := 0
 	execute := func(ctx *sdk.ToolExecContext, input any) (any, error) {
 		executed = true
 		return "done", nil
@@ -1185,6 +1185,7 @@ func TestClient_StreamText_ApprovalHandlerErrorAfterDeferral(t *testing.T) {
 		sdk.WithMaxSteps(5),
 		sdk.WithApprovalHandler(func(_ context.Context, tc sdk.ToolCall) (sdk.ToolApprovalResult, error) {
 			if tc.ToolName == "tool_a" {
+				hostWrites++ // Simulates a per-call pending row the SDK cannot roll back.
 				return sdk.ToolApprovalResult{Decision: sdk.ToolApprovalDecisionDeferred, ApprovalID: "approval-a"}, nil
 			}
 			return sdk.ToolApprovalResult{}, errors.New("approval store unavailable")
@@ -1214,6 +1215,9 @@ func TestClient_StreamText_ApprovalHandlerErrorAfterDeferral(t *testing.T) {
 	}
 	if sr.Pause != nil {
 		t.Errorf("no pause should be reported: %#v", sr.Pause)
+	}
+	if hostWrites != 1 {
+		t.Fatalf("host writes: %d, want 1 (per-call callbacks are not transactional)", hostWrites)
 	}
 }
 
@@ -1569,9 +1573,8 @@ func TestClient_GenerateTextResult_PrepareStepOverride(t *testing.T) {
 	}
 }
 
-// Regression: the pause must be built from the pristine input snapshot.
-// PrepareStep reassigns cfg.Params.Messages to the accumulated conversation;
-// building the pause from that duplicated every prior step's messages.
+// Regression: an observe-only PrepareStep must not duplicate the accumulated
+// conversation in the pause.
 func TestClient_GenerateTextResult_PauseSurvivesPrepareStep(t *testing.T) {
 	mp := &mockProvider{handler: func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
 		switch call {
@@ -1646,6 +1649,250 @@ func TestClient_GenerateTextResult_PauseSurvivesPrepareStep(t *testing.T) {
 	}
 }
 
+// A pause captures the effective context of the model call that deferred,
+// including PrepareStep history compaction and system overrides. Rebuilding it
+// from the run's original input would silently restore discarded history.
+func TestClient_GenerateTextResult_PauseUsesPreparedContext(t *testing.T) {
+	tests := []struct {
+		name       string
+		prepare    func(*sdk.GenerateParams) *sdk.GenerateParams
+		failCommit bool
+	}{
+		{
+			name: "mutate params and return nil",
+			prepare: func(p *sdk.GenerateParams) *sdk.GenerateParams {
+				p.Messages = []sdk.Message{sdk.UserMessage("compressed history")}
+				p.System = "prepared rules"
+				return nil
+			},
+		},
+		{
+			name: "return replacement params",
+			prepare: func(p *sdk.GenerateParams) *sdk.GenerateParams {
+				next := *p
+				next.Messages = []sdk.Message{sdk.UserMessage("compressed history")}
+				next.System = "prepared rules"
+				return &next
+			},
+		},
+		{
+			name: "commit barrier failure",
+			prepare: func(p *sdk.GenerateParams) *sdk.GenerateParams {
+				next := *p
+				next.Messages = []sdk.Message{sdk.UserMessage("compressed history")}
+				next.System = "prepared rules"
+				return &next
+			},
+			failCommit: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			options := preparedPauseOptions(tc.prepare)
+			if tc.failCommit {
+				options = append(options, sdk.WithOnStepCommitted(func(_ context.Context, _ int, step *sdk.StepResult) error {
+					if len(step.DeferredToolApprovals) > 0 {
+						call := step.Messages[0].Content[1].(sdk.ToolCallPart)
+						call.ToolCallID = "corrupted-message"
+						call.Input.(map[string]any)["target"] = "corrupted"
+						step.Messages[0].Content[1] = call
+						toolResult := step.Messages[1].Content[0].(sdk.ToolResultPart)
+						toolResult.Result.(map[string]any)["status"] = "corrupted"
+						step.Messages[1].Content[0] = toolResult
+						step.DeferredToolApprovals[0].ToolCall.ToolCallID = "corrupted-pending"
+						step.DeferredToolApprovals[0].ToolCall.Input.(map[string]any)["target"] = "corrupted"
+						step.DeferredToolApprovals[0].Approval.Metadata["queue"].(map[string]any)["name"] = "corrupted"
+						return errors.New("pause persistence failed")
+					}
+					return nil
+				}))
+			}
+
+			result, err := sdk.GenerateTextResult(context.Background(), options...)
+			if tc.failCommit {
+				if err == nil || !strings.Contains(err.Error(), "pause persistence failed") {
+					t.Fatalf("error = %v, want commit barrier failure", err)
+				}
+			} else if err != nil {
+				t.Fatalf("GenerateTextResult: %v", err)
+			}
+			assertPreparedPause(t, result.Pause)
+		})
+	}
+}
+
+func TestClient_StreamText_PauseUsesPreparedContext(t *testing.T) {
+	for _, failCommit := range []bool{false, true} {
+		name := "success"
+		if failCommit {
+			name = "commit barrier failure"
+		}
+		t.Run(name, func(t *testing.T) {
+			options := preparedPauseOptions(replaceWithPreparedContext)
+			if failCommit {
+				options = append(options, sdk.WithOnStepCommitted(func(_ context.Context, _ int, step *sdk.StepResult) error {
+					if len(step.DeferredToolApprovals) > 0 {
+						return errors.New("pause persistence failed")
+					}
+					return nil
+				}))
+			}
+			sr, err := sdk.StreamText(context.Background(), options...)
+			if err != nil {
+				t.Fatalf("StreamText: %v", err)
+			}
+
+			sawPausedFinish := false
+			sawCommitError := false
+			for part := range sr.Stream {
+				switch p := part.(type) {
+				case *sdk.ErrorPart:
+					if !failCommit || !strings.Contains(p.Error.Error(), "pause persistence failed") {
+						t.Fatalf("stream error: %v", p.Error)
+					}
+					sawCommitError = true
+					assertPreparedPause(t, sr.Pause)
+				case *sdk.FinishPart:
+					if p.FinishReason == sdk.FinishReasonPaused {
+						sawPausedFinish = true
+						assertPreparedPause(t, sr.Pause)
+					}
+				}
+			}
+			if failCommit {
+				if !sawCommitError || sawPausedFinish {
+					t.Fatalf("commit error=%v paused finish=%v", sawCommitError, sawPausedFinish)
+				}
+			} else if !sawPausedFinish || sawCommitError {
+				t.Fatalf("paused finish=%v commit error=%v", sawPausedFinish, sawCommitError)
+			}
+		})
+	}
+}
+
+func replaceWithPreparedContext(p *sdk.GenerateParams) *sdk.GenerateParams {
+	next := *p
+	next.Messages = []sdk.Message{sdk.UserMessage("compressed history")}
+	next.System = "prepared rules"
+	return &next
+}
+
+func preparedPauseOptions(prepare func(*sdk.GenerateParams) *sdk.GenerateParams) []sdk.GenerateOption {
+	mp := &mockProvider{handler: func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+		switch call {
+		case 1:
+			return &sdk.GenerateResult{
+				FinishReason: sdk.FinishReasonToolCalls,
+				ToolCalls:    []sdk.ToolCall{{ToolCallID: "c1", ToolName: "lookup", Input: nil}},
+			}, nil
+		case 2:
+			if params.System != "prepared rules" {
+				return nil, fmt.Errorf("provider system: %q, want prepared rules", params.System)
+			}
+			if err := validateSingleTextMessage(params.Messages, "compressed history"); err != nil {
+				return nil, err
+			}
+			return &sdk.GenerateResult{
+				FinishReason: sdk.FinishReasonToolCalls,
+				ToolCalls: []sdk.ToolCall{
+					{ToolCallID: "c2", ToolName: "audit", Input: map[string]any{"target": "release"}},
+					{ToolCallID: "c3", ToolName: "deploy", Input: map[string]any{"target": "production"}},
+				},
+			}, nil
+		default:
+			return nil, fmt.Errorf("unexpected provider call %d", call)
+		}
+	}}
+
+	return []sdk.GenerateOption{
+		sdk.WithModel(mockModel(mp)),
+		sdk.WithSystem("original rules"),
+		sdk.WithMessages([]sdk.Message{sdk.UserMessage("uncompressed history")}),
+		sdk.WithTools([]sdk.Tool{
+			{Name: "lookup", Parameters: &jsonschema.Schema{Type: "object"},
+				Execute: func(ctx *sdk.ToolExecContext, in any) (any, error) { return "lookup-ok", nil }},
+			{Name: "audit", Parameters: &jsonschema.Schema{Type: "object"},
+				Execute: func(ctx *sdk.ToolExecContext, in any) (any, error) { return map[string]any{"status": "ok"}, nil }},
+			{Name: "deploy", Parameters: &jsonschema.Schema{Type: "object"}, RequireApproval: true,
+				Execute: func(ctx *sdk.ToolExecContext, in any) (any, error) { return "deploy-ok", nil }},
+		}),
+		sdk.WithMaxSteps(5),
+		sdk.WithPrepareStep(prepare),
+		sdk.WithApprovalHandler(func(_ context.Context, call sdk.ToolCall) (sdk.ToolApprovalResult, error) {
+			// Approval callbacks retain their historical input ownership. A host
+			// mutation must not rewrite the provider call stored in the pause.
+			call.Input.(map[string]any)["target"] = "handler-mutated"
+			return sdk.ToolApprovalResult{
+				Decision:   sdk.ToolApprovalDecisionDeferred,
+				ApprovalID: "approval-" + call.ToolCallID,
+				Metadata:   map[string]any{"queue": map[string]any{"name": "deployments"}},
+			}, nil
+		}),
+	}
+}
+
+func assertSingleTextMessage(t *testing.T, messages []sdk.Message, want string) {
+	t.Helper()
+	if err := validateSingleTextMessage(messages, want); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func validateSingleTextMessage(messages []sdk.Message, want string) error {
+	if len(messages) != 1 || messages[0].Role != sdk.MessageRoleUser || len(messages[0].Content) != 1 {
+		return fmt.Errorf("messages: %#v, want one user text message", messages)
+	}
+	text, ok := messages[0].Content[0].(sdk.TextPart)
+	if !ok || text.Text != want {
+		return fmt.Errorf("message content: %#v, want %q", messages[0].Content, want)
+	}
+	return nil
+}
+
+func assertPreparedPause(t *testing.T, pause *sdk.ToolApprovalPause) {
+	t.Helper()
+	if pause == nil {
+		t.Fatal("expected a pause")
+	}
+	if pause.System != "prepared rules" {
+		t.Fatalf("pause system: %q, want prepared rules", pause.System)
+	}
+	if len(pause.Messages) != 3 {
+		t.Fatalf("pause messages: got %d, want 3: %#v", len(pause.Messages), pause.Messages)
+	}
+	assertSingleTextMessage(t, pause.Messages[:1], "compressed history")
+	if pause.Messages[1].Role != sdk.MessageRoleAssistant || len(pause.Messages[1].Content) != 2 {
+		t.Fatalf("paused assistant message: %#v", pause.Messages[1])
+	}
+	for i, wantID := range []string{"c2", "c3"} {
+		call, ok := pause.Messages[1].Content[i].(sdk.ToolCallPart)
+		if !ok || call.ToolCallID != wantID {
+			t.Fatalf("paused tool call %d: %#v, want %s", i, pause.Messages[1].Content[i], wantID)
+		}
+		if got := call.Input.(map[string]any)["target"]; got != []string{"release", "production"}[i] {
+			t.Fatalf("paused tool call %d target: %v", i, got)
+		}
+	}
+	if pause.Messages[2].Role != sdk.MessageRoleTool || len(pause.Messages[2].Content) != 1 {
+		t.Fatalf("resolved sibling message: %#v", pause.Messages[2])
+	}
+	result, ok := pause.Messages[2].Content[0].(sdk.ToolResultPart)
+	if !ok || result.ToolCallID != "c2" || result.Result.(map[string]any)["status"] != "ok" {
+		t.Fatalf("resolved sibling result: %#v", pause.Messages[2].Content[0])
+	}
+	if len(pause.Pending) != 1 || pause.Pending[0].ToolCall.ToolCallID != "c3" {
+		t.Fatalf("pending approvals: %#v", pause.Pending)
+	}
+	if got := pause.Pending[0].ToolCall.Input.(map[string]any)["target"]; got != "production" {
+		t.Fatalf("pending input target: %v", got)
+	}
+	queue := pause.Pending[0].Approval.Metadata["queue"].(map[string]any)
+	if queue["name"] != "deployments" {
+		t.Fatalf("pending metadata: %#v", pause.Pending[0].Approval.Metadata)
+	}
+}
+
 // Regression: sr.Pause must be readable at the moment FinishPart(paused)
 // arrives — the documented in-band pause signal.
 func TestClient_StreamText_PauseVisibleAtFinishPart(t *testing.T) {
@@ -1684,7 +1931,7 @@ func TestClient_StreamText_PauseVisibleAtFinishPart(t *testing.T) {
 }
 
 // Regression: a deferral in a batch with duplicate or empty tool-call IDs
-// would produce an unresumable pause — it must fail at pause time instead.
+// would produce an unaddressable pause — it must fail at pause time instead.
 func TestClient_GenerateTextResult_DeferredWithBadIDsFails(t *testing.T) {
 	run := func(t *testing.T, calls []sdk.ToolCall, wantErr string) {
 		mp := &mockProvider{handler: func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
@@ -1722,6 +1969,151 @@ func TestClient_GenerateTextResult_DeferredWithBadIDsFails(t *testing.T) {
 			{ToolCallID: "c1", ToolName: "gated", Input: nil},
 		}, "not unique")
 	})
+}
+
+// A keyed batch request must be addressable before host code runs. Invalid
+// provider IDs are known before the handler, so a transactional handler must
+// never commit rows that the SDK will immediately reject.
+func TestClient_GenerateTextResult_ApprovalBatchHandlerRejectsBadCallIDsBeforeInvocation(t *testing.T) {
+	tests := []struct {
+		name    string
+		calls   []sdk.ToolCall
+		wantErr string
+	}{
+		{
+			name:    "empty gated ID",
+			calls:   []sdk.ToolCall{{ToolCallID: "", ToolName: "gated_a", Input: nil}},
+			wantErr: "has no tool call ID",
+		},
+		{
+			name: "duplicate gated IDs",
+			calls: []sdk.ToolCall{
+				{ToolCallID: "c1", ToolName: "gated_a", Input: nil},
+				{ToolCallID: "c1", ToolName: "gated_b", Input: nil},
+			},
+			wantErr: "not unique",
+		},
+		{
+			name: "gated ID duplicates non-gated sibling",
+			calls: []sdk.ToolCall{
+				{ToolCallID: "c1", ToolName: "safe", Input: nil},
+				{ToolCallID: "c1", ToolName: "gated_a", Input: nil},
+			},
+			wantErr: "not unique",
+		},
+		{
+			name: "duplicate non-gated sibling IDs",
+			calls: []sdk.ToolCall{
+				{ToolCallID: "c1", ToolName: "safe", Input: nil},
+				{ToolCallID: "c1", ToolName: "safe", Input: nil},
+				{ToolCallID: "c2", ToolName: "gated_a", Input: nil},
+			},
+			wantErr: "not unique",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mp := &mockProvider{handler: func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+				return &sdk.GenerateResult{FinishReason: sdk.FinishReasonToolCalls, ToolCalls: tc.calls}, nil
+			}}
+			handlerCalls := 0
+			executed := false
+			result, err := sdk.GenerateTextResult(context.Background(),
+				sdk.WithModel(mockModel(mp)),
+				sdk.WithMessages([]sdk.Message{sdk.UserMessage("go")}),
+				sdk.WithTools([]sdk.Tool{
+					{Name: "safe", Parameters: &jsonschema.Schema{Type: "object"},
+						Execute: func(ctx *sdk.ToolExecContext, in any) (any, error) { executed = true; return "ok", nil }},
+					{Name: "gated_a", Parameters: &jsonschema.Schema{Type: "object"}, RequireApproval: true,
+						Execute: func(ctx *sdk.ToolExecContext, in any) (any, error) { executed = true; return "ok", nil }},
+					{Name: "gated_b", Parameters: &jsonschema.Schema{Type: "object"}, RequireApproval: true,
+						Execute: func(ctx *sdk.ToolExecContext, in any) (any, error) { executed = true; return "ok", nil }},
+				}),
+				sdk.WithMaxSteps(5),
+				sdk.WithApprovalBatchHandler(func(_ context.Context, _ string, calls []sdk.ToolCall) ([]sdk.ToolApprovalBatchResult, error) {
+					handlerCalls++
+					answers := make([]sdk.ToolApprovalBatchResult, len(calls))
+					for i, call := range calls {
+						answers[i] = sdk.ToolApprovalBatchResult{
+							ToolCallID: call.ToolCallID,
+							Result:     sdk.ToolApprovalResult{Decision: sdk.ToolApprovalDecisionApproved},
+						}
+					}
+					return answers, nil
+				}),
+			)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error = %v, want containing %q", err, tc.wantErr)
+			}
+			if result != nil {
+				t.Fatalf("result = %#v, want nil", result)
+			}
+			if handlerCalls != 0 {
+				t.Fatalf("batch handler calls: %d, want 0", handlerCalls)
+			}
+			if executed {
+				t.Fatal("no tool may execute when batch request IDs are invalid")
+			}
+		})
+	}
+}
+
+func TestClient_StreamText_ApprovalBatchHandlerRejectsBadCallIDsBeforeInvocation(t *testing.T) {
+	mp := &mockProvider{handler: func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+		return &sdk.GenerateResult{
+			FinishReason: sdk.FinishReasonToolCalls,
+			ToolCalls: []sdk.ToolCall{
+				{ToolCallID: "c1", ToolName: "safe", Input: nil},
+				{ToolCallID: "c1", ToolName: "gated", Input: nil},
+			},
+		}, nil
+	}}
+	handlerCalls := 0
+	executed := false
+	sr, err := sdk.StreamText(context.Background(),
+		sdk.WithModel(mockModel(mp)),
+		sdk.WithMessages([]sdk.Message{sdk.UserMessage("go")}),
+		sdk.WithTools([]sdk.Tool{
+			{Name: "safe", Parameters: &jsonschema.Schema{Type: "object"},
+				Execute: func(ctx *sdk.ToolExecContext, in any) (any, error) { executed = true; return "ok", nil }},
+			{Name: "gated", Parameters: &jsonschema.Schema{Type: "object"}, RequireApproval: true,
+				Execute: func(ctx *sdk.ToolExecContext, in any) (any, error) { executed = true; return "ok", nil }},
+		}),
+		sdk.WithMaxSteps(5),
+		sdk.WithApprovalBatchHandler(func(_ context.Context, _ string, calls []sdk.ToolCall) ([]sdk.ToolApprovalBatchResult, error) {
+			handlerCalls++
+			return nil, errors.New("must not be called")
+		}),
+	)
+	if err != nil {
+		t.Fatalf("StreamText: %v", err)
+	}
+
+	sawError := false
+	for part := range sr.Stream {
+		switch p := part.(type) {
+		case *sdk.ToolApprovalRequestPart:
+			t.Fatalf("approval event emitted for invalid call IDs: %#v", p)
+		case *sdk.ErrorPart:
+			sawError = true
+			if !strings.Contains(p.Error.Error(), "not unique") {
+				t.Fatalf("stream error = %v, want non-unique IDs", p.Error)
+			}
+		}
+	}
+	if !sawError {
+		t.Fatal("expected ErrorPart")
+	}
+	if handlerCalls != 0 {
+		t.Fatalf("batch handler calls: %d, want 0", handlerCalls)
+	}
+	if executed {
+		t.Fatal("no tool may execute when batch request IDs are invalid")
+	}
+	if len(sr.Steps) != 0 || sr.Pause != nil {
+		t.Fatalf("stream state after validation failure: steps=%d pause=%#v", len(sr.Steps), sr.Pause)
+	}
 }
 
 // The batch approval handler answers a whole step's gated calls in one

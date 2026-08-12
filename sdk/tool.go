@@ -49,29 +49,30 @@ type ToolApprovalBatchResult struct {
 }
 
 // ToolApprovalPause is the portable state of a run that stopped on deferred
-// tool approvals (FinishReason == FinishReasonPaused). It carries everything
-// needed to resume: the run's system prompt, the full conversation (input
-// plus every message the run produced, ending in the paused step's assistant
-// message and the tool message covering the already-resolved calls) and the
-// calls awaiting a decision. The value is plain data — persist it, ship it
-// across processes, and hand it back to ResumeText / ApplyToolDecisions once
-// decisions arrive.
+// tool approvals (FinishReason == FinishReasonPaused). It contains the exact
+// system prompt and conversation used for the paused model step, followed by
+// that step's assistant message and any already-resolved tool results, plus
+// the calls awaiting a decision. Hosts may persist or transfer this plain data
+// while collecting decisions. JSON persistence supports the SDK's built-in
+// MessagePart types and requires tool inputs, tool results, and metadata to be
+// JSON-compatible.
 type ToolApprovalPause struct {
 	// BatchID identifies the approval batch that produced this pause. It is
 	// set only when an ApprovalBatchHandler was consulted — it is the same ID
-	// that invocation received, giving hosts a stable correlation key:
-	// approval records tagged with a BatchID whose pause was never persisted
-	// belong to a failed run and can be cancelled. It is a correlation ID,
-	// not an idempotency key — retrying a step mints a new one; hosts needing
-	// idempotency must key on their own run identity plus the tool-call IDs.
+	// that invocation received, giving hosts a stable correlation key. It is a
+	// correlation ID, not an idempotency key — retrying a step mints a new one;
+	// hosts needing idempotency must key on their own run identity plus the
+	// tool-call IDs. The absence of a pause alone does not establish that host
+	// records are orphaned because a fully approved or rejected batch also
+	// completes without one.
 	// Empty when the per-call ApprovalHandler was used (that handler never
 	// sees a batch ID, so records cannot be correlated by it).
 	BatchID string `json:"batchId,omitempty"`
-	// System is the root instruction the paused run was started with. Resume
-	// re-applies it so the model keeps its original instructions; a resume
-	// that also passes WithSystem is rejected as conflicting.
+	// System is the root instruction used for the paused model step, including
+	// any override applied by OnStep or PrepareStep.
 	System string `json:"system,omitempty"`
-	// Messages is the full conversation at the pause point.
+	// Messages is the effective input of the paused model step followed by that
+	// step's assistant message and any already-resolved tool results.
 	Messages []Message `json:"messages"`
 	// Pending lists the tool calls awaiting a user decision, in the paused
 	// assistant message's order.

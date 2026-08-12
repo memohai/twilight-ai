@@ -16,7 +16,7 @@ func (c *Client) GenerateText(ctx context.Context, options ...GenerateOption) (s
 	if err != nil {
 		return "", err
 	}
-	// A pause is a resumable state, not a completion: swallowing it here
+	// A pause is an incomplete run state, not a completion: swallowing it here
 	// would strand the pending approvals with no signal to the caller.
 	if result.FinishReason == FinishReasonPaused {
 		return "", ErrRunPaused
@@ -60,7 +60,7 @@ func (c *Client) GenerateTextResult(ctx context.Context, options ...GenerateOpti
 	if err != nil {
 		// A failure after a deferral (the paused step's commit barrier
 		// erroring) must not lose the pause: by then approval requests are
-		// announced and sibling side effects have happened. Return it
+		// announced and sibling side effects may have happened. Return it
 		// alongside the error so the host can persist it and reconcile.
 		if pause := st.pause(); pause != nil {
 			return &GenerateResult{

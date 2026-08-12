@@ -274,6 +274,7 @@ type GenerateResult struct {
     ToolCalls       []ToolCall
     ToolResults     []ToolResult
     Response        ResponseMetadata
+    Pause           *ToolApprovalPause
     Steps           []StepResult
     Messages        []Message
 }
@@ -291,6 +292,7 @@ type StepResult struct {
     ToolCalls       []ToolCall
     ToolResults     []ToolResult
     Response        ResponseMetadata
+    DeferredToolApprovals []DeferredToolApproval
     Messages        []Message
 }
 ```
@@ -303,9 +305,14 @@ type StepResult struct {
 | `FinishReasonLength` | `"length"` | Max tokens reached |
 | `FinishReasonContentFilter` | `"content-filter"` | Content filter triggered |
 | `FinishReasonToolCalls` | `"tool-calls"` | Model wants to call tools |
+| `FinishReasonPaused` | `"paused"` | Run paused with deferred tool approvals |
 | `FinishReasonError` | `"error"` | An error occurred |
 | `FinishReasonOther` | `"other"` | Provider-specific reason |
 | `FinishReasonUnknown` | `"unknown"` | Unknown reason |
+
+`FinishReasonPaused` is a run-level result only. The paused `StepResult` keeps
+the provider's `FinishReasonToolCalls` because that value describes the model
+call itself.
 
 #### ResponseFormat
 
@@ -356,9 +363,11 @@ All options are of type `GenerateOption` (`func(*generateConfig)`).
 | `WithMaxSteps(n int)` | `0` = single call (default), `N` = up to N calls, `-1` = unlimited |
 | `WithOnFinish(fn func(*GenerateResult))` | Called when all steps complete |
 | `WithOnStep(fn func(*StepResult) *GenerateParams)` | Called after each step; return non-nil to override next step |
-| `WithOnStepCommitted(fn func(context.Context, int, *StepResult) error)` | Synchronous commit barrier before accepting a complete step or starting the next model call |
+| `WithOnStepCommitted(fn func(context.Context, int, *StepResult) error)` | Synchronous commit barrier before accepting a complete step or starting the next model call; a deferred pause is frozen before this callback |
 | `WithPrepareStep(fn func(*GenerateParams) *GenerateParams)` | Called before each step (from step 2); can modify params |
-| `WithApprovalHandler(fn func(ctx, ToolCall) (bool, error))` | Approval for tools with `RequireApproval` |
+| `WithApprovalHandler(fn func(context.Context, ToolCall) (ToolApprovalResult, error))` | Return approved, rejected, or deferred for each tool with `RequireApproval` |
+| `WithApprovalHandlerBool(fn func(context.Context, ToolCall) (bool, error))` | Adapter for the original synchronous bool approval callback |
+| `WithApprovalBatchHandler(fn func(context.Context, string, []ToolCall) ([]ToolApprovalBatchResult, error))` | Decide all approval-gated, executable calls in one invocation; mutually exclusive with `WithApprovalHandler` |
 
 ---
 
@@ -383,6 +392,47 @@ type ToolExecContext struct {
     SendProgress func(content any) // nil outside streaming mode
 }
 ```
+
+#### Tool Approval Types
+
+```go
+type ToolApprovalDecision string
+
+const (
+    ToolApprovalDecisionApproved ToolApprovalDecision = "approved"
+    ToolApprovalDecisionRejected ToolApprovalDecision = "rejected"
+    ToolApprovalDecisionDeferred ToolApprovalDecision = "deferred"
+)
+
+type ToolApprovalResult struct {
+    Decision   ToolApprovalDecision
+    ApprovalID string
+    Reason     string
+    Metadata   map[string]any
+}
+
+type DeferredToolApproval struct {
+    ToolCall ToolCall
+    Approval ToolApprovalResult
+}
+
+type ToolApprovalBatchResult struct {
+    ToolCallID string
+    Result     ToolApprovalResult
+}
+
+type ToolApprovalPause struct {
+    BatchID  string
+    System   string
+    Messages []Message
+    Pending  []DeferredToolApproval
+}
+```
+
+`ToolApprovalPause` captures the effective system prompt and conversation for
+the paused model call, its output, and all calls still awaiting a decision.
+`BatchID` is set only for a pause produced through `WithApprovalBatchHandler`;
+it is a correlation ID, not an idempotency key.
 
 #### ToolCall & ToolResult
 
@@ -450,6 +500,7 @@ type StreamResult struct {
     Stream   <-chan StreamPart
     Steps    []StepResult  // populated after stream consumed
     Messages []Message     // populated after stream consumed
+    Pause    *ToolApprovalPause
 }
 
 func (sr *StreamResult) Text() (string, error)
@@ -498,7 +549,7 @@ type StreamPart interface {
 | `*StreamToolResultPart` | `ToolCallID`, `ToolName`, `Input`, `Output` |
 | `*StreamToolErrorPart` | `ToolCallID`, `ToolName`, `Error` |
 | `*ToolOutputDeniedPart` | `ToolCallID`, `ToolName` |
-| `*ToolApprovalRequestPart` | `ApprovalID`, `ToolCallID`, `ToolName`, `Input` |
+| `*ToolApprovalRequestPart` | `ApprovalID`, `ToolCallID`, `ToolName`, `Input`, `Metadata` |
 | `*ToolProgressPart` | `ToolCallID`, `ToolName`, `Content` |
 
 **Sources & Files:**
@@ -519,6 +570,16 @@ type StreamPart interface {
 | `*ErrorPart` | `Error` |
 | `*AbortPart` | `Reason` |
 | `*RawPart` | `RawValue` |
+
+On a normal deferred-approval pause, `StreamResult.Pause` is populated before
+the stream emits `FinishPart` with `FinishReasonPaused`. If the paused step's
+`OnStepCommitted` callback fails, `StreamResult.Pause` is still populated, but
+the stream emits `ErrorPart` and no paused `FinishPart`.
+
+Persisted pauses can round-trip through JSON when `Messages` uses the SDK's
+built-in message-part types and nested tool inputs, resolved results, provider
+metadata, and approval metadata are JSON-compatible. See
+[Deferred Approvals](./tools.md#deferred-approvals) for the pause lifecycle.
 
 ---
 

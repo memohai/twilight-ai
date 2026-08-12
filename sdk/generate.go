@@ -68,8 +68,7 @@ type StepResult struct {
 	Response        ResponseMetadata `json:"response,omitempty"`
 	// DeferredToolApprovals lists every tool call in this step awaiting a user
 	// decision, in tool-call order. When non-empty, ToolResults and the step's
-	// tool message cover only the calls that were already resolved; the caller
-	// must supply results for the deferred calls before resuming the run.
+	// tool message cover only the calls that were already resolved.
 	DeferredToolApprovals []DeferredToolApproval `json:"deferredToolApprovals,omitempty"`
 	// Messages holds the messages produced by this step (assistant + tool),
 	// excluding any prior context from earlier steps.
@@ -89,8 +88,8 @@ type GenerateResult struct {
 	ToolResults               []ToolResult     `json:"toolResults,omitempty"`
 	Response                  ResponseMetadata `json:"response,omitempty"`
 	// Pause is set when the run stopped on deferred tool approvals
-	// (FinishReason == FinishReasonPaused). It is the portable resume state:
-	// hand it to ResumeText / ApplyToolDecisions with the user's decisions.
+	// (FinishReason == FinishReasonPaused). Persist it while the pending calls
+	// await decisions.
 	Pause *ToolApprovalPause `json:"pause,omitempty"`
 	// Steps holds the result of each step in a multi-step execution.
 	Steps []StepResult `json:"steps,omitempty"`

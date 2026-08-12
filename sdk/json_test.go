@@ -143,6 +143,67 @@ func TestMessage_JSON_AllPartTypes(t *testing.T) {
 	}
 }
 
+func TestToolApprovalPause_JSONRoundTrip(t *testing.T) {
+	pause := sdk.ToolApprovalPause{
+		BatchID: "batch-1",
+		System:  "release rules",
+		Messages: []sdk.Message{
+			sdk.UserMessage("deploy"),
+			{
+				Role: sdk.MessageRoleAssistant,
+				Content: []sdk.MessagePart{sdk.ToolCallPart{
+					ToolCallID:       "call-1",
+					ToolName:         "deploy",
+					Input:            map[string]any{"target": "production"},
+					ProviderMetadata: map[string]any{"signature": "message-signature"},
+				}},
+			},
+		},
+		Pending: []sdk.DeferredToolApproval{{
+			ToolCall: sdk.ToolCall{
+				ToolCallID:       "call-1",
+				ToolName:         "deploy",
+				Input:            map[string]any{"target": "production"},
+				ProviderMetadata: map[string]any{"signature": "pending-signature"},
+			},
+			Approval: sdk.ToolApprovalResult{
+				Decision:   sdk.ToolApprovalDecisionDeferred,
+				ApprovalID: "approval-1",
+				Reason:     "needs release owner",
+				Metadata:   map[string]any{"workspace": "release"},
+			},
+		}},
+	}
+
+	data, err := json.Marshal(pause)
+	if err != nil {
+		t.Fatalf("marshal pause: %v", err)
+	}
+	var got sdk.ToolApprovalPause
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal pause: %v", err)
+	}
+	if got.BatchID != "batch-1" || got.System != "release rules" || len(got.Messages) != 2 || len(got.Pending) != 1 {
+		t.Fatalf("pause round trip: %#v", got)
+	}
+	call, ok := got.Messages[1].Content[0].(sdk.ToolCallPart)
+	if !ok || call.ToolCallID != "call-1" || call.ToolName != "deploy" ||
+		call.Input.(map[string]any)["target"] != "production" ||
+		call.ProviderMetadata["signature"] != "message-signature" {
+		t.Fatalf("paused message call: %#v", got.Messages[1].Content)
+	}
+	pending := got.Pending[0]
+	if pending.ToolCall.ToolCallID != "call-1" || pending.ToolCall.ToolName != "deploy" ||
+		pending.ToolCall.Input.(map[string]any)["target"] != "production" ||
+		pending.ToolCall.ProviderMetadata["signature"] != "pending-signature" ||
+		pending.Approval.Decision != sdk.ToolApprovalDecisionDeferred ||
+		pending.Approval.ApprovalID != "approval-1" ||
+		pending.Approval.Reason != "needs release owner" ||
+		pending.Approval.Metadata["workspace"] != "release" {
+		t.Fatalf("pending approval: %#v", pending)
+	}
+}
+
 func TestMessage_JSON_FromRawJSON(t *testing.T) {
 	raw := `{
 		"role": "user",
