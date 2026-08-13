@@ -434,6 +434,20 @@ the paused model call, its output, and all calls still awaiting a decision.
 `BatchID` is set only for a pause produced through `WithApprovalBatchHandler`;
 it is a correlation ID, not an idempotency key.
 
+```go
+func CompleteToolApprovalPause(
+    pause *ToolApprovalPause,
+    results []ToolResultPart,
+) ([]Message, error)
+```
+
+Validates one final result for every pending call and returns a new,
+protocol-complete conversation. The function does not execute tools or call a
+model. Input results may be unordered; the appended tool message follows the
+original assistant tool-call order. Persist and reuse `pause.System` alongside
+the returned messages when continuing with `GenerateTextResult` or
+`StreamText`.
+
 #### ToolCall & ToolResult
 
 ```go

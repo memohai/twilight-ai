@@ -361,6 +361,45 @@ A normally paused run reports `FinishReasonPaused` on the overall result (and on
 
 The paused step's `Messages` include the assistant message with all tool calls plus a tool message covering only the already-resolved calls. `Pause.Pending` identifies the unresolved calls. Persisted JSON from older versions used the singular `deferredToolApproval` key, which this version no longer reads.
 
+### Completing a Paused Conversation
+
+Approval decisions, tool execution, and deferred interactions belong to the host. Once the host has obtained one final `ToolResultPart` for every pending call, `CompleteToolApprovalPause` validates the paused state and adds the completing tool message:
+
+```go
+// Load final outcomes from the host's trusted approval/execution records.
+// Those records, rather than pause.Pending, authorize any external side
+// effect and bind it to the host's workspace, fencing, and retry policy.
+results, err := approvalStore.FinalResults(ctx, pause.BatchID)
+if err != nil {
+    return err
+}
+
+completed, err := sdk.CompleteToolApprovalPause(pause, results)
+if err != nil {
+    return err
+}
+persist(pause.System, completed)
+```
+
+The function is pure conversation assembly: it does not execute tools, call a model, emit stream events, or persist data. It verifies that the final assistant tool-call message and existing tool results are well formed; that `Pause.Pending` is exactly the unresolved subset and still matches each call's ID, name, input, and provider metadata; and that the host supplied exactly one result for every pending call. Results may arrive in any order. The completing tool message follows the model's original call order. A result may omit `ToolName`, in which case the SDK fills the canonical name from the assistant call; a conflicting non-empty name is rejected.
+
+This validation protects the conversation assembled for the model. It happens after the host has obtained final results, so it is not an authorization check for side effects. Do not execute a deployment, payment, or other sensitive operation solely from an untrusted or manually assembled `pause.Pending`; authorize it from the host's trusted approval records and stored call identity.
+
+Persist both `pause.System` and `completed`. Continue with the ordinary generation API, explicitly restoring both values:
+
+```go
+stream, err := sdk.StreamText(ctx,
+    sdk.WithModel(model),
+    sdk.WithSystem(pause.System),
+    sdk.WithMessages(completed),
+    sdk.WithTools(tools),
+    sdk.WithMaxSteps(5),
+    sdk.WithApprovalHandler(handler), // future calls may require approval
+)
+```
+
+For deployments, payments, `ask_user`, and other durable workflows, the host owns execution policy, transactions, workspace targeting, fencing, idempotency, and recovery. `CompleteToolApprovalPause` does not provide exactly-once execution: in particular, it cannot close a crash window between an external side effect and persistence of the completed conversation. Its guarantee is narrower — malformed or incomplete tool protocol is rejected before a completed conversation is returned.
+
 ## Streaming with Tools
 
 Tool calling works seamlessly with `StreamText`. Progress updates from tool execution are delivered through the stream:
