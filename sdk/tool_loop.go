@@ -158,7 +158,7 @@ func runToolLoop(
 		// or tools, so their established input ownership semantics remain unchanged.
 		var pauseOut *stepOutcome
 		if canPause && hasApprovalGatedTools(out.toolCalls, toolMap) {
-			cloned := cloneStepOutcome(out)
+			cloned := cloneStepOutcome(&out)
 			pauseOut = &cloned
 		}
 

@@ -6,21 +6,21 @@ func cloneDeferredToolApprovals(src []DeferredToolApproval) []DeferredToolApprov
 	if src == nil {
 		return nil
 	}
-	return cloneSDKValue(src).([]DeferredToolApproval)
+	return cloneSDKValue(src)
 }
 
 func clonePauseMessages(src []Message) []Message {
 	if src == nil {
 		return nil
 	}
-	return cloneSDKValue(src).([]Message)
+	return cloneSDKValue(src)
 }
 
 func cloneToolCalls(src []ToolCall) []ToolCall {
 	if src == nil {
 		return nil
 	}
-	return cloneSDKValue(src).([]ToolCall)
+	return cloneSDKValue(src)
 }
 
 // deferredWithOriginalCalls keeps approval results returned by the host while
@@ -46,11 +46,11 @@ func cloneAnyMap(src map[string]any) map[string]any {
 	if src == nil {
 		return nil
 	}
-	return cloneSDKValue(src).(map[string]any)
+	return cloneSDKValue(src)
 }
 
-func cloneStepOutcome(src stepOutcome) stepOutcome {
-	cloned := src
+func cloneStepOutcome(src *stepOutcome) stepOutcome {
+	cloned := *src
 	cloned.reasoningMeta = cloneAnyMap(src.reasoningMeta)
 	cloned.toolCalls = cloneToolCalls(src.toolCalls)
 	return cloned
@@ -65,11 +65,17 @@ func cloneStepOutcome(src stepOutcome) stepOutcome {
 // As with any handoff in Go, the producer must stop mutating a value while or
 // after returning it to the SDK. A copy can isolate later consumers; it cannot
 // make a concurrent read of a map safe while its producer is still writing.
-func cloneSDKValue(value any) any {
-	if value == nil {
-		return nil
+func cloneSDKValue[T any](value T) T {
+	reflected := reflect.ValueOf(value)
+	if !reflected.IsValid() {
+		var zero T
+		return zero
 	}
-	return clonePauseReflect(reflect.ValueOf(value), make(map[pauseCloneVisit]reflect.Value)).Interface()
+	cloned, ok := clonePauseReflect(reflected, make(map[pauseCloneVisit]reflect.Value)).Interface().(T)
+	if !ok {
+		panic("twilightai: cloned pause value changed type")
+	}
+	return cloned
 }
 
 type pauseCloneVisit struct {
